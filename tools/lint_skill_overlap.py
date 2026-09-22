@@ -21,8 +21,10 @@ It is written and reviewed by hand, never derived from frequency — `cmd:vllm` 
 *because* it is the tool's identity, which is the one thing worth comparing.
 
 What it cannot tell you: a skill that is prose only, or a restatement in different words
-with no shared commands. That was measured, not assumed. If a keyless check ever claims
-to catch a paraphrase, it is lying. This one claims something smaller and checkable.
+with no shared commands. That was measured, not assumed. If a keyless *action* check ever
+claims to catch a paraphrase, it is lying. This one claims something smaller and checkable,
+and what would narrow the gap is a second axis over the text itself - not a wider threshold
+on this one, which reports legitimate siblings and still cannot see a copy.
 
 Duplicated *text* is inside that blind spot, not next to it, so the score is not a
 duplication score and a low one is not a clean bill. `torch-xpu-bench` and

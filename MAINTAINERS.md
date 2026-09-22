@@ -83,8 +83,12 @@ What it cannot do, measured rather than assumed:
 - **A restatement in different words is out of reach.** A prose-only skill has no actions
   to compare. Embeddings do not close this: on this catalog `potion-base-8M` scored a
   legitimate pair 0.9000 and a near-verbatim copy 0.8877, ranking the legitimate pair
-  higher. The instrument that would work is a model reading both, which no keyless gate can
-  have.
+  higher. Closing it takes a different instrument — a literal text axis, or a model reading
+  both — not a wider threshold on this one: a threshold high enough to miss the legitimate
+  pair misses the copy too. A keyless text axis is not out of reach, which is why the gap is
+  recorded as open rather than as impossible; what it needs before it could gate anything is
+  a stoplist for shared boilerplate, since the provenance notice `sync_external.py --write`
+  adds is byte-identical in all four skills that carry it.
 - **Name and description cannot screen a duplicate.** They are read, but only to order a
   queue of the pairs the action axis cannot judge. A near-verbatim copy shares 0.05 of its
   description with the skill it copies while sharing 1.0000 of its actions, and a
