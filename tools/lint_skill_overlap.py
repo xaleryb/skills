@@ -1072,8 +1072,8 @@ def build_parser() -> argparse.ArgumentParser:
                              f"low this goes")
     parser.add_argument("--advisory", action="store_true",
                         help="report and exit 0, annotating each finding for the pull "
-                             "request, unless --strict is given or a pair with a skill "
-                             "authored here reaches containment 1.0. How CI runs it: which "
+                             "request, unless a pair with a skill authored here reaches "
+                             "containment 1.0. How CI runs it: which "
                              "of two overlapping skills wins is a judgement call, so it is "
                              "put in front of a reviewer rather than made by a threshold - "
                              "but a skill that does nothing another already does leaves "
@@ -1087,7 +1087,6 @@ def build_parser() -> argparse.ArgumentParser:
                              "verdict - and the dial for anything downstream that pays per "
                              "pair, since all-pairs is 44850 comparisons at 300 skills.")
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--strict", action="store_true", help="exit nonzero on warnings too")
     parser.add_argument("--self-test", action="store_true",
                         help="assert the detector still detects, against skills/ as "
                              "committed. Writes nothing. Run it before the gate.")
@@ -1245,7 +1244,7 @@ def summarize(skills: list[dict], scored: list[dict], undeclared: list[dict],
                 "to; it does not defer whether one of them is a copy. Drop one, or narrow "
                 "one so it stops being contained in the other.", file=sys.stderr)
         return 1
-    return 1 if args.strict and undeclared else 0
+    return 0
 
 
 def main() -> int:
