@@ -221,20 +221,12 @@ Only `--check-links` and `sync_external.py --check` reach the network. If the of
 pass, the blocking checks left are about the repository rather than your text: the workflow
 linters and the installer round trip.
 
-The last one blocks on one finding only — a skill of yours that does nothing another
-already does — and is worth running anyway for the rest: it lists the skills that drive the
-same commands, flags and API calls as yours without either description saying which one a
-request should route to. Answer it in the pull request rather than by editing a number —
-two skills sharing a tool is normal here, two skills competing silently for the same
-request is not. It also prints a short queue ranked by name and description alone, which is
-all that reaches a skill with too little code to compare; that queue is a reading order and
-settles nothing. A clean run is not a duplication check — it compares what a skill does, not
-what it says, so a section copied from another skill passes it and reaches a reviewer
-instead.
-
-You are never asked to move a threshold. If your skill raises the highest score in the
-catalog past `--max-overlap`, `--self-test` prints the new legal range as a note and the
-build stays green; moving the number is a maintainer's call.
+The last one lists the skills that drive the same commands, flags and API calls as yours
+with neither description saying which one a request should route to. Answer that in the pull
+request; it fails only if your skill does nothing another already does. It compares what a
+skill does, not what it says, so a clean run is not a duplication check — and no threshold
+here is yours to move: if your skill raises the catalog's highest score, `--self-test` prints
+the new range as a note and stays green.
 
 ### The security scan
 
@@ -349,13 +341,9 @@ Blocking, keyless, and runnable on a fork:
 Reported but not blocking: the coverage gaps between what a suite claims and what it
 implements, a dead link in a body this repository copied rather than wrote, a SkillSpector
 HIGH/CRITICAL finding in a skill whose score is still within its threshold, and a pair of
-skills that drive the same actions with no hand-off written between them. The last is
-annotated on the pull request and left to the reviewer, because which of two overlapping
-skills should win is a judgement about the catalog rather than about the bytes. What does
-block is a skill of yours that does nothing another already does — there is no division of
-labour left to judge — and that check's own self-test: a detector that has stopped
-detecting reports a clean zero for every pair, which reads exactly like a catalog with no
-duplication.
+skills that drive the same actions with no hand-off written between them — a reviewer's call
+rather than a threshold's. What blocks there is a skill of yours that does nothing another
+already does, and that check's own self-test.
 
 ## Evaluation levels
 

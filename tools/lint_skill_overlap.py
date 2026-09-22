@@ -5,47 +5,20 @@
     python3 tools/lint_skill_overlap.py --show vllm-xpu-run  # one skill's signature
     python3 tools/lint_skill_overlap.py --max-overlap 0.75 --min-shared 8 --advisory
 
-Two skills driving the same tool with the same flags compete for the same request. That
-is fine, and this catalog is full of such pairs — as long as one of them says which is
-which. `vllm-xpu-bench` and `vllm-xpu-run` name each other; `torch-xpu-run` and
-`torch-xpu-profile` never have, and an agent holding both has nothing to route on.
+Two skills driving the same tool compete for the same request. Fine as long as one says
+which is which: `vllm-xpu-bench` and `vllm-xpu-run` name each other, `torch-xpu-run` and
+`torch-xpu-profile` never have. So this compares what each skill *does* - commands, flags,
+variables, API calls, endpoint paths, from fences, inline spans and bundled files - and
+subtracts every pair with a hand-off written down. Name and description only order a queue
+of the pairs with too little code to compare; they decide nothing.
 
-So this compares not prose but what each skill *does*: the commands, flags, environment
-variables, API calls and endpoint paths in its code — fenced blocks, inline spans and
-bundled `.sh`/`.py`/`.md` — then subtracts the pairs where a hand-off is written down.
-The fence's language tag picks the extractor, and that split is load-bearing: read a
-Python fence as shell and `import` becomes a high-frequency command.
+Duplicated *text* is the blind spot: `torch-xpu-bench` and `vllm-xpu-bench` share an
+`## Env vars` table and score 0.0833. The OK line says so, being the line at risk of reading
+as a verdict on duplication.
 
-PLATFORM strips what every skill here does anyway: `docker`, `/dev/dri`, `--group-add`.
-It is written and reviewed by hand, never derived from frequency — `cmd:vllm` is frequent
-*because* it is the tool's identity, which is the one thing worth comparing.
-
-What it cannot tell you: a skill that is prose only, or a restatement in different words
-with no shared commands. That was measured, not assumed. If a keyless *action* check ever
-claims to catch a paraphrase, it is lying. This one claims something smaller and checkable,
-and what would narrow the gap is a second axis over the text itself - not a wider threshold
-on this one, which reports legitimate siblings and still cannot see a copy.
-
-Duplicated *text* is inside that blind spot, not next to it, so a low score is not a clean
-bill: `torch-xpu-bench` and `vllm-xpu-bench` carry the same `## Env vars` table — four
-variables in the same order, two rows byte-identical — and this scores the pair 0.0833. The
-OK line says so, because that is the line at risk of being read as a verdict on duplication.
-
-Which is why the name and the description are also read, but only to order a queue of the
-pairs the action axis cannot judge — a skill with no code still has both. They decide
-nothing: the two axes agree on 2 of the 14 pairs at the top of this tree, a shared-name
-precondition would drop 4 of those 14, and the near-verbatim fixture shares 0.05 of its
-description with the skill it copies while sharing 1.0000 of its actions. As a reading
-order they are worth the ~0.2s they cost, and they are the only affordable way to pick the
-few pairs anything downstream that pays per pair should look at.
-
-A high score is not a defect by itself; a high score nobody documented is. Which of two
-overlapping skills should win is a judgement about the catalog, not about the bytes, so CI
-runs `--advisory`: findings are annotated on the pull request and the merge is not blocked.
-`--self-test` does block, because a detector that has stopped detecting is not a judgement
-call. One finding blocks under `--advisory` for the same reason: at containment 1.0 a skill
-authored here does nothing another already does, so there is no division of labour to weigh
-and nothing a hand-off could describe.
+CI runs `--advisory`: which of two overlapping skills wins is a reviewer's call. Two things
+block - `--self-test`, and containment 1.0 on a pair with a skill authored here. Rationale
+and calibration: MAINTAINERS.md.
 """
 
 from __future__ import annotations
@@ -238,13 +211,8 @@ def shared_elements(text: str) -> set[str]:
 def shell_elements(text: str) -> set[str]:
     """Commands and flags: argv-0 after a line start, a pipe, a `&&` or a `$(`.
 
-    Two rules below are measured rather than assumed. A head must be lower case, or a
-    console block's own output (`Detected 2 devices`), a heredoc marker (`EOF`) and a
-    traceback name all arrive as commands — in sibling skills together, inflating exactly
-    the pairs being judged. And a head the script defines itself is dropped, because
-    `usage`, `record` and `die` are house style: two skills that both define `usage()`
-    have nothing in common. Before that, the preflight pair shared thirteen "actions", ten
-    of them their own function names and log words.
+    Lower case only, or console output and heredoc markers arrive as commands; a head the
+    script defines itself is house style (`usage`, `die`), not a shared action.
     """
     local = set(SHELL_FUNCTION.findall(text))
     found = flags(text) | shared_elements(text)
@@ -272,11 +240,10 @@ def shell_elements(text: str) -> set[str]:
 
 
 def inline_elements(text: str) -> set[str]:
-    """Flags, variables and endpoints in inline code spans — those three only.
+    """Flags, variables and endpoints in inline code spans - those three only.
 
-    An inline span is usually a *value*, not a command (`bf16`, `awq`, `int4`, `model`),
-    and reading those as commands put a dozen into every vLLM skill at once. A flag, an
-    all-caps variable and a `/v1/...` path are unambiguous by shape; a bare word is not.
+    An inline span is usually a value (`bf16`, `awq`), not a command; those three are
+    unambiguous by shape, a bare word is not.
     """
     prose = FENCE.sub("", text)
     spans = "\n".join(INLINE_CODE.findall(prose))
@@ -284,10 +251,10 @@ def inline_elements(text: str) -> set[str]:
 
 
 def python_elements(text: str) -> set[str]:
-    """Imports and two-segment dotted paths — `torch.xpu`, `dpnp.asnumpy`.
+    """Imports and two-segment dotted paths - `torch.xpu`, `dpnp.asnumpy`.
 
-    NOT_AN_API covers the two shapes the regex cannot tell apart from a call: a filename
-    and a host. `config.json` and `huggingface.co` were being reported as shared actions.
+    NOT_AN_API drops the two shapes a dotted regex cannot tell from a call: a filename and
+    a host (`config.json`, `huggingface.co`).
     """
     found = shared_elements(text)
     for module in PY_IMPORT.findall(text):
@@ -333,9 +300,8 @@ def document_elements(text: str) -> set[str]:
 def signature(body: str, bundled: dict[str, str]) -> set[str]:
     """Every action this skill performs, minus the platform layer.
 
-    Bundled `.md` counts: `vllm-xpu-bench` reaches `/v1/chat/completions` only in
-    `references/sweep-and-compare.md`. The catalog's four `.c` files are not read, so
-    `onetbb-quickstart` is under-measured — recorded in --self-test rather than hidden.
+    Bundled `.md` counts - `vllm-xpu-bench` reaches `/v1/chat/completions` only there. `.c`
+    files are not read, so `onetbb-quickstart` is under-measured.
     """
     found = document_elements(body)
     for name, text in bundled.items():
@@ -397,10 +363,8 @@ def mentions(skill: dict, other: str) -> bool:
 def handoff_index(skills: list[dict]) -> dict[str, set[str]]:
     """Which catalog skills each body names, in one pass per body rather than one per pair.
 
-    This is where the cost of a large catalog turned out to live: at 300 skills the
-    per-pair form spent 22.0s of 22.0s here, against 0.03s for the action comparison
-    itself. Same boundaries as mentions(), and --self-test asserts the two agree on every
-    pair in the tree rather than trusting that they do.
+    Where the cost lives: at 300 skills the per-pair form spent 22.0s of 22.0s here. Same
+    boundaries as mentions(), and --self-test asserts the two agree on every pair.
     """
     names = sorted((skill["name"] for skill in skills), key=len, reverse=True)
     if not names or BROKEN.which == "M4":
@@ -454,10 +418,8 @@ def pairs(skills: list[dict], min_shared: int,
     """Score every pair. Under MIN_SIGNATURE actions on the smaller side there is too little
     material to mean anything either way, so the pair is not scored at all.
 
-    Name and description overlap ride along as columns because they are nearly free once
-    hoisted out of the loop, and they order the queue in lexical(). They gate nothing: on
-    this tree a shared-name-token precondition would drop 4 of the 14 judgeable pairs,
-    linux-perf | performance-patterns among them.
+    Name and description overlap ride along as nearly-free columns for lexical() to rank by.
+    They gate nothing: a shared-name precondition would drop 4 of the 14 judgeable pairs.
     """
     if index is None:
         index = handoff_index(skills)
@@ -496,16 +458,11 @@ def lexical(skills: list[dict], min_shared: int,
             index: dict[str, set[str]] | None = None) -> list[dict]:
     """Rank the pairs the action axis cannot judge, by shared name parts then description.
 
-    A skill with almost no code has no action signature, so pairs() either skips it or
-    cannot reach min_shared - but every skill has a name and a description. Declared pairs
-    are dropped for the same reason the action axis drops them.
-
-    Ordered by how blind the action axis is to the pair first, and only then by prose:
-    ranking on the words alone buries a new contribution behind the catalog's existing name
-    families, which is the case that matters most - a prose-only candidate sat at rank 113
-    of 466 under a name-first key and rank 7 under this one. It still does not name the
-    right counterpart (0.11 against the wrong skill, measured), which is why this is a
-    reading order and not a verdict.
+    A skill with almost no code has no action signature, but every skill has a name and a
+    description. Blindness of the action axis is the first sort key and prose only the
+    second: ranking on words alone buried a prose-only candidate at rank 113 of 466, against
+    rank 7 here. It still names the wrong counterpart, so this is a reading order, not a
+    verdict.
     """
     if index is None:
         index = handoff_index(skills)
@@ -559,10 +516,8 @@ def worst_no_edge(scored: list[dict], min_shared: int) -> dict | None:
 def verdict(pair: dict, max_overlap: float, min_shared: int) -> str:
     """ok, WARN, or REVIEW - the last meaning someone here can fix it, not that CI fails.
 
-    A hand-off explains a division of labour. At containment 1.0 there is no division to
-    explain, so it is reported even when declared: a file copied under a new name carries
-    the original's name in its own text and would otherwise silence itself, which is how
-    this rule was found.
+    A hand-off explains a division of labour, and at containment 1.0 there is none to
+    explain: a copy carries the original's name in its own text and would silence itself.
     """
     if pair["containment"] <= max_overlap or len(pair["shared"]) < min_shared:
         return "ok"
@@ -694,15 +649,9 @@ def queued(fixture: dict, skills: list[dict], min_shared: int) -> list[dict]:
 def threshold_copies() -> dict[float, list[str]]:
     """Every file that documents the gate threshold, keyed by the value it names.
 
-    A walk rather than the four files that name it today: a fifth copy in a file nobody
-    thought of is the drift this exists to catch, and a hand-list here would itself be one
-    more thing to keep in step. skills/ is skipped - a skill body is content, and a skill
-    that ever teaches this flag should not be able to fail the gate's own calibration.
-
-    The rule that follows from the walk, and it is a rule rather than an accident: any
-    --max-overlap value written anywhere outside skills/ is a copy of the gate's number, so
-    a documented example at some other value is drift. Describe another run in prose, or
-    document it at the gate's own number.
+    A walk, not a hand-list: the drift worth catching is a fifth copy nobody thought of. The
+    rule it implies - any --max-overlap outside skills/ is a copy of the gate's number, so
+    document another run in prose rather than at another value. skills/ is content.
     """
     found: dict[float, list[str]] = {}
     for base, directories, names in os.walk(REPO_ROOT):
@@ -724,9 +673,8 @@ def threshold_copies() -> dict[float, list[str]]:
 def refuses(value: str) -> str:
     """argparse's message for a rejected --min-shared, or "" if the parser accepted it.
 
-    Through the parser rather than through shared_actions() directly, because what could
-    regress is the wiring: with `type=int` back in place the flag takes 3 and reports fewer
-    pairs, which reads like a stricter run rather than a narrower one.
+    Through the parser, not shared_actions(): the wiring is what regresses, and with
+    `type=int` back in place the flag takes 3 and reads as stricter rather than narrower.
     """
     stderr = io.StringIO()
     try:
@@ -740,13 +688,9 @@ def refuses(value: str) -> str:
 def suggested_threshold(ceiling: float) -> float | None:
     """The 0.05 step to put in the workflow for a tree with this ceiling, or None.
 
-    Not the next step above the ceiling where there is a choice: at the edge of the band the
-    skill after this one moves it again, which is the whole reason this function exists. So
-    1.15x first, and only then the lowest step the band allows - a high ceiling leaves no
-    room for the margin (1.15 * 0.8182 = 0.94 is outside the band at all), and answering
-    None there would fail the blocking self-test with no legal number to name. Above 0.90
-    nothing is offered, because there two skills are close to subsumption and the answer is
-    to narrow one of them rather than to raise a number until it stops reporting them.
+    1.15x first, then the lowest step the band allows: at the band's edge the next skill
+    moves the ceiling again. Above 0.90 nothing is offered - two skills that close are near
+    subsumption, and the answer is to narrow one, not to raise a number past them.
     """
     room = [step / 20 for step in range(2, 19) if ceiling < step / 20 <= 1.5 * ceiling]
     return min([v for v in room if v >= 1.15 * ceiling] or room) if room else None
@@ -854,11 +798,8 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
     if worst is None:
         sys.exit("FAIL --self-test found no undeclared pair to calibrate against")
 
-    # A band, not equality: the worst undeclared pair goes *down* when someone writes a
-    # hand-off line, so pinning the threshold to it would force a workflow edit per fix.
-    # The workflow is the one copy CI reads, so it is the one this calibrates against; the
-    # rest are documentation that would otherwise tell a contributor to run a gate the
-    # repository no longer runs.
+    # The workflow is the one copy CI reads; the rest are documentation that would otherwise
+    # tell a contributor to run a gate this repository does not run.
     copies = threshold_copies()
     workflow_name = WORKFLOW.relative_to(REPO_ROOT).as_posix()
     check("every copy of the threshold names the same number",
@@ -871,12 +812,9 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
         budget = min(found) if found else 0.0
     else:
         budget = max_overlap
-    # One band, both bounds read off the tree: above every pair already merged, so nothing
-    # in the catalog is reported and a legitimate sibling arriving next is not either; and
-    # no more than half again above it, or the gate carries slack nobody chose. Calibrating
-    # against the highest *judgeable* pair rather than the highest undeclared one is
-    # deliberate - the undeclared ceiling falls whenever someone writes a hand-off line,
-    # while this one only moves when the catalog does.
+    # Both bounds read off the tree: above every pair already merged, and no more than half
+    # again above it. Calibrated on the highest *judgeable* pair, not the highest undeclared
+    # one, which falls whenever someone writes a hand-off line.
     judgeable = [pair for pair in scored if len(pair["shared"]) >= min_shared]
     ceiling = max(pair["containment"] for pair in judgeable)
     top_pair = max(judgeable, key=lambda pair: pair["containment"])
@@ -1091,9 +1029,8 @@ MUTATIONS = {
 def shared_actions(value: str) -> int:
     """--min-shared, refused below the floor rather than silently clipped to it.
 
-    Asking for fewer shared actions than a signature needs to be scored at all reads like a
-    request for more sensitivity and delivers none: the pairs it would reach are the ones
-    MIN_SIGNATURE already removed, and they are listed by --queue instead.
+    Below MIN_SIGNATURE it reads as more sensitivity and delivers none: those pairs are
+    already gone, and --queue is where they are listed.
     """
     count = int(value)
     if count < MIN_SIGNATURE:
@@ -1119,11 +1056,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--advisory", action="store_true",
                         help="report and exit 0, annotating each finding for the pull "
                              "request, unless a pair with a skill authored here reaches "
-                             "containment 1.0. How CI runs it: which "
-                             "of two overlapping skills wins is a judgement call, so it is "
-                             "put in front of a reviewer rather than made by a threshold - "
-                             "but a skill that does nothing another already does leaves "
-                             "nothing to judge.")
+                             "containment 1.0. How CI runs it: which of two overlapping "
+                             "skills wins is a reviewer's call, but a skill that does "
+                             "nothing another does leaves nothing to judge.")
     parser.add_argument("--show", metavar="SKILL", help="print one skill's signature")
     parser.add_argument("--top", type=int, default=15, metavar="N",
                         help="rows of the ranked table to print")
@@ -1156,12 +1091,8 @@ def show_signature(skills: list[dict], name: str) -> int:
 
 
 def print_ranked(scored: list[dict], queue: list[dict], top: int) -> None:
-    """The table, then the pairs the action axis cannot judge.
-
-    The second block is a reading order and not a finding: a pair whose smaller side
-    carries too little code to compare still shares a name and a description, but the
-    near-verbatim fixture scores 0.05 on description while its actions score 1.0000.
-    """
+    """The table, then the pairs the action axis cannot judge - a reading order, not a
+    finding: the near-verbatim fixture scores 0.05 on description and 1.0000 on actions."""
     print(f"{'containment':>11} {'shared':>6} {'name':>4} {'jaccard':>7} {'hand-off':>8}  pair")
     for pair in scored[:top]:
         edge = pair["handoff"] or "-"
@@ -1190,23 +1121,12 @@ def undeclared_pairs(scored: list[dict], min_shared: int) -> list[dict]:
 
 def subsumed_pairs(scored: list[dict]) -> list[dict]:
     """The REVIEW pairs `--advisory` has nothing to defer: one skill does everything the
-    other does, so there is no division of labour for a reviewer to weigh and nothing a
-    hand-off could say. Which of two overlapping skills wins is a judgement about the
-    catalog; that one of them is a copy is not, which is the argument that makes
-    `--self-test` block.
+    other does, so there is no division of labour to weigh.
 
-    Not routed through verdict(), which would inherit --min-shared: a copy of a 7-action
-    skill shares 7 actions, and under `--min-shared 8` the gate scored it "ok" and merged
-    it green - measured on xpu-discover, which is one of the 4 skills thin enough for that.
-    --min-shared is a reach for near-misses, and a subset is not a near-miss. MIN_SIGNATURE
-    stays the only floor, and it is load-bearing: linux-perf | onetbb-quickstart is a real
-    1.0 over three C loop variables.
-
-    `authored` is the scoping that remains, because the repair for an upstream copy is in
-    someone else's repository. len(shared) == smaller is exact in binary floating point at
-    every signature size, so >= 1.0 is the subset test it looks like - a copy that appends a
-    section is still caught, and only a copy that *replaces* an action drops below, at
-    (s-1)/s.
+    Deliberately not routed through verdict(), which would inherit --min-shared: a copy of a
+    7-action skill shares 7 actions, and under `--min-shared 8` the gate called it ok and
+    merged it green. MIN_SIGNATURE stays the only floor, `authored` the only scoping - an
+    upstream copy is repaired upstream.
     """
     if BROKEN.which == "M8":
         return []

@@ -69,54 +69,26 @@ that it did not run rather than passing silently.
 
 `tools/lint_skill_overlap.py` answers a narrower question than "are these two skills
 duplicates": do they drive the same commands, flags, environment variables, API calls and
-endpoint paths, and does neither description name the other? Two skills sharing a tool is
-normal here and most of the catalog does it; two skills competing silently for the same
-request is what leaves an agent nothing to route on. `--advisory` in CI, because which of
-two overlapping skills should win is a judgement about the catalog. One finding blocks even
-so: at containment 1.0 a skill authored here does nothing the other already does, so there
-is no division of labour to weigh — two imports at 1.0 stay a warning, because that repair
-lives upstream. Its `--self-test` does block — on the detector's liveness, not on any
-calibration against today's tree — and `--mutate M1`…`M10` exist so that each way of breaking
-the detector can be shown to turn it red.
+endpoint paths, and does neither description name the other? Sharing a tool is normal here
+and most of the catalog does it; competing silently for the same request is what leaves an
+agent nothing to route on.
+
+`--advisory` in CI, because which of two overlapping skills should win is a judgement about
+the catalog. One finding blocks: containment 1.0 on a pair with a skill authored here, where
+that skill does nothing the other already does and there is no division of labour to weigh.
+Two imports at 1.0 stay a warning — that repair lives upstream. `--self-test` blocks on the
+detector's liveness, never on calibration against today's tree, and `--mutate M1`…`M10` show
+each way of breaking the detector turning it red.
 
 What it cannot do, measured rather than assumed:
 
-- **A restatement in different words is out of reach.** A prose-only skill has no actions
-  to compare. Embeddings do not close this: on this catalog `potion-base-8M` scored a
-  legitimate pair 0.9000 and a near-verbatim copy 0.8877, ranking the legitimate pair
-  higher. Closing it takes a different instrument — a literal text axis, or a model reading
-  both — not a wider threshold on this one: a threshold high enough to miss the legitimate
-  pair misses the copy too. A keyless text axis is not out of reach, which is why the gap is
-  recorded as open rather than as impossible; what it needs before it could gate anything is
-  a stoplist for shared boilerplate, since the provenance notice `sync_external.py --write`
-  adds is byte-identical in all four skills that carry it.
-- **Name and description cannot screen a duplicate.** They are read, but only to order a
-  queue of the pairs the action axis cannot judge. A near-verbatim copy shares 0.05 of its
-  description with the skill it copies while sharing 1.0000 of its actions, and a
-  shared-name precondition would drop 4 of the 14 judgeable pairs in this tree — so the
-  cheap signal is a reading order, never a filter and never a verdict.
-- **Most of the catalog is out of the action axis's reach, and the summary says so.** Of
-  the 528 pairs in 33 skills, 14 are judged; 421 share fewer than the `--min-shared 8`
-  actions a pair needs, and 93 touch a skill carrying fewer than five actions of its own
-  and are never scored. That second floor is not a flag, and `--min-shared` below it is
-  refused rather than accepted: it would read as a stricter run while reaching nothing.
-  What it buys is visible in the one pair it hides — `linux-perf` and `onetbb-quickstart`
-  share `cmd:double`, `cmd:i` and `cmd:int`, three loop variables out of a C snippet, for a
-  containment of 1.0 over three actions. That is the only 1.0 pair in the tree, and the
-  floor is why the one blocking finding does not fire on it.
-- **The threshold is not a constant to defend.** CI runs `--max-overlap 0.75`. `--self-test`
-  prints, as a note rather than a failure, whether it still sits in the 1.0–1.5× band above
-  the highest-scoring pair in the tree (0.6154 at 33 skills) and the value to set if not.
-  That ceiling rises with the catalog — 0.36 at 12 skills, 0.56 at 20, 0.62 at 33, and 0.64
-  to 0.82 with one more `dpnp-*` sibling — so a pull request that only added a skill can move
-  it, and does not own it. What does block is disagreement: every file naming the flag must
-  name the same number.
-- **There is a stricter run, and it is not the CI one.** Setting `--max-overlap` to zero and
-  dropping `--advisory` fails on any undeclared pair touching a skill authored here, at any
-  score. Useful when auditing a family of skills on purpose; wrong as a gate, because on
-  this tree every judged pair reports and the signal stops being a signal. Spelled out in
-  prose rather than as a command, because the drift check below reads any `--max-overlap`
-  value it finds in a text file as a copy of the gate's number.
+| limit | measured |
+|---|---|
+| a restatement in different words is out of reach | `potion-base-8M` ranked a legitimate pair (0.9000) *above* a near-verbatim copy (0.8877). Closing this needs a literal-text axis, with a stoplist for the provenance notice that is byte-identical in all four imported skills — not a wider threshold, which misses the copy too |
+| name and description cannot screen a duplicate | a near-verbatim copy shares 0.05 of its description and 1.0000 of its actions, and a shared-name precondition would drop 4 of the 14 judgeable pairs. They order a reading queue and decide nothing |
+| most pairs are out of the action axis's reach, and the summary says so | of 528 pairs in 33 skills: 14 judged, 421 under `--min-shared 8`, 93 touching a skill with fewer than five actions of its own. That floor is not a flag, and it is why `linux-perf` and `onetbb-quickstart` — 1.0 over three C loop variables — does not block |
+| the threshold is not a constant to defend | CI runs `--max-overlap 0.75`. `--self-test` prints as a *note* whether it still sits in the 1.0–1.5× band above the tree's top pair (0.6154 at 33 skills), and the value to set if not: that ceiling rises with the catalog (0.36 at 12 skills, 0.56 at 20, 0.62 at 33), so a contribution can move it and does not own it. Disagreement between the files naming the flag does block |
+| a stricter run exists, and it is not the CI one | setting `--max-overlap` to zero and dropping `--advisory` fails on any undeclared authored pair at any score. Useful for auditing one family on purpose, useless as a gate. In prose rather than as a command, because the drift check reads any `--max-overlap` value in a text file as a copy of the gate's number |
 
 ## Level 2 — the differential
 
