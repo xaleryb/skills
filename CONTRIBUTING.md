@@ -228,7 +228,9 @@ request should route to. Answer it in the pull request rather than by editing a 
 two skills sharing a tool is normal here, two skills competing silently for the same
 request is not. It also prints a short queue ranked by name and description alone, which is
 all that reaches a skill with too little code to compare; that queue is a reading order and
-settles nothing.
+settles nothing. A clean run is not a duplication check — it compares what a skill does, not
+what it says, so a section copied from another skill passes it and reaches a reviewer
+instead.
 
 There is one number you may be asked to move, and only when `--self-test` says so: adding a
 skill next to a family that already exists can raise the highest score in the catalog past

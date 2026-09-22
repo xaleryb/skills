@@ -24,6 +24,14 @@ What it cannot tell you: a skill that is prose only, or a restatement in differe
 with no shared commands. That was measured, not assumed. If a keyless check ever claims
 to catch a paraphrase, it is lying. This one claims something smaller and checkable.
 
+Duplicated *text* is inside that blind spot, not next to it, so the score is not a
+duplication score and a low one is not a clean bill. `torch-xpu-bench` and
+`vllm-xpu-bench` carry the same `## Env vars` table — the same four variables in the same
+order, two rows byte-identical — and this scores the pair 0.0833: one of those variables is
+in PLATFORM by design, and a table of them is prose either way. A reviewer reading both
+files sees it immediately, which is the division of labour, and the OK line says so - that
+is the line at risk of being read as a clean bill.
+
 Which is why the name and the description are also read, but only to order a queue of the
 pairs the action axis cannot judge — a skill with no code still has both. They decide
 nothing: the two axes agree on 2 of the 14 pairs at the top of this tree, a shared-name
@@ -1233,7 +1241,10 @@ def summarize(skills: list[dict], scored: list[dict], undeclared: list[dict],
               + (". Advisory - which skill wins is a reviewer's call, not this check's, so "
                  "the merge is not blocked." if not subsumed else "."))
     else:
-        print(f"OK {summary}, none over {budget:.2f}.")
+        # Only on this line. A REVIEW line already has something to act on; an OK line is
+        # the one a reader can mistake for "no duplication in this catalog".
+        print(f"OK {summary}, none over {budget:.2f}. Scope: shared actions, not shared "
+              "text - two skills can duplicate a whole section and score near zero here.")
     if subsumed:
         sys.stdout.flush()
         print(f"FAIL {len(subsumed)} pair(s) where a skill authored here does nothing the "
