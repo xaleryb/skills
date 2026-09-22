@@ -72,47 +72,18 @@ jobs:
       - name: Task leakage
         run: python3 tools/lint_task_leakage.py --fail-on-leak 5
 
-      # Same argument as above, and the failure is even quieter: a fence regex that stops
-      # matching scores every pair 0, which reads exactly like a catalog with no
-      # duplication.
+      # Quieter than the step above: a fence regex that stops matching scores every pair 0,
+      # which reads exactly like a catalog with no duplication. Blocks on the detector's
+      # liveness only - calibration against today's tree is printed, never failed, so adding
+      # a skill cannot redden this.
       - name: Overlap detector still detects
         run: python3 tools/lint_skill_overlap.py --self-test
 
-      # Two skills driving the same tool with the same flags compete for the same request.
-      # That is fine and this catalog is full of such pairs — as long as one of them says
-      # which is which. This reports a pair with no hand-off written either way, ranking
-      # first the ones over the threshold with a skill authored here, since an import can
-      # only be repaired upstream.
-      #
-      # --advisory, so it annotates the pull request and exits 0: whether two overlapping
-      # skills should be merged, split, or left alone is a judgement about the catalog that a
-      # reviewer makes with the contributor. A threshold that made it for them would be
-      # wrong in both directions — blocking a legitimate composition pair, and passing the
-      # restatement in prose it cannot see at all. The step above does block, because a
-      # detector that has stopped detecting is not a judgement call.
-      #
-      # One finding blocks even so: containment 1.0 on a pair with a skill authored here
-      # means that skill does nothing the other already does, so there is no division of
-      # labour to weigh and nothing a hand-off could describe. Two imports at 1.0 stay a
-      # warning, because the repair is in someone else's repository.
-      #
-      # It also prints a short queue ranked by name and description overlap alone, covering
-      # the pairs with too little code to compare — a reading order only, since on this tree
-      # that ranking agrees with the action score on 2 pairs of 14 and would drop 4 of them
-      # if it were used to decide what gets compared.
-      #
-      # The threshold below sits in the middle of the band the self-test enforces, not at
-      # its lower edge. That band is 1.0-1.5x the highest-scoring judgeable pair in the tree
-      # (dpnp-quickstart | dpnp-troubleshooting, 0.6154 at 33 skills), and the ceiling was
-      # measured to rise with the catalog — 0.36 at 12 skills, 0.56 at 20, 0.62 at 33. At
-      # the lower edge one more dpnp-* skill reusing dpnp.array/asnumpy/arange pushes the
-      # ceiling past it and fails the blocking step above on a pull request that only added
-      # a skill — measured at 0.64 to 0.82 across three such siblings, all of which declared
-      # their hand-offs and were counted anyway, because the band is calibrated on every
-      # judgeable pair and not only the undeclared ones. Mid-band absorbs most of that
-      # range, and 0.82 is the case it does not; when it no longer does, the
-      # self-test prints the legal range and the value to put here. A verbatim copy scores
-      # 1.0 whatever this number is, so the one blocking finding does not depend on it.
+      # Advisory: which of two overlapping skills should win is a judgement a reviewer makes
+      # with the contributor. One finding blocks anyway - containment 1.0 on a pair with a
+      # skill authored here does nothing the other does not, so there is no division of
+      # labour to weigh, and a copy scores 1.0 whatever the threshold is. Rationale, the
+      # threshold's band and what the check cannot see: MAINTAINERS.md.
       - name: Skill overlap
         run: python3 tools/lint_skill_overlap.py --max-overlap 0.75 --min-shared 8 --advisory
 

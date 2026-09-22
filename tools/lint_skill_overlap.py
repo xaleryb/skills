@@ -368,11 +368,6 @@ def load(directory: Path, report: Report) -> dict | None:
                 prose.append(content)
 
     reference_text = HTML_COMMENT.sub("", "\n".join(prose))
-    if BROKEN.which == "M6" and directory.name == "torch-xpu-profile":
-        reference_text += "\n\nTo run inference rather than profile it, see torch-xpu-run.\n"
-    if BROKEN.which == "M7" and directory.name == "vllm-xpu-run":
-        reference_text = re.sub(r"(?<![\w-])vllm-xpu-profile(?![\w-])", "", reference_text)
-
     return {
         "name": directory.name,
         "description": str(front.get("description", "")),
@@ -393,6 +388,8 @@ def load_all(report: Report) -> list[dict]:
 
 
 def mentions(skill: dict, other: str) -> bool:
+    if BROKEN.which == "M4":
+        return False
     pattern = rf"(?<![A-Za-z0-9-]){re.escape(other)}(?![A-Za-z0-9-])"
     return re.search(pattern, skill["reference_text"]) is not None
 
@@ -406,14 +403,14 @@ def handoff_index(skills: list[dict]) -> dict[str, set[str]]:
     pair in the tree rather than trusting that they do.
     """
     names = sorted((skill["name"] for skill in skills), key=len, reverse=True)
-    if not names:
-        return {}
+    if not names or BROKEN.which == "M4":
+        return {skill["name"]: set() for skill in skills}
     alternation = "|".join(re.escape(name) for name in names)
     pattern = re.compile(rf"(?<![A-Za-z0-9-])({alternation})(?![A-Za-z0-9-])")
     return {
         skill["name"]: set(pattern.findall(
             skill["reference_text"][: len(skill["reference_text"]) // 2]
-            if BROKEN.which == "M10" else skill["reference_text"]))
+            if BROKEN.which == "M7" else skill["reference_text"]))
         for skill in skills
     }
 
@@ -447,7 +444,7 @@ def below_floor(skills: list[dict]) -> int:
     every thick one, plus the thin ones among themselves.
     """
     thin = sum(1 for skill in skills if len(skill["signature"]) < MIN_SIGNATURE)
-    if BROKEN.which == "M13":
+    if BROKEN.which == "M10":
         return 0
     return thin * (len(skills) - thin) + thin * (thin - 1) // 2
 
@@ -467,13 +464,13 @@ def pairs(skills: list[dict], min_shared: int,
     vocab = vocabulary(skills)
     out = []
     for left, right in combinations(skills, 2):
-        if BROKEN.which == "M9" and not (
+        if BROKEN.which == "M6" and not (
             vocab[left["name"]][0] & vocab[right["name"]][0]
         ):
             continue
         shared = left["signature"] & right["signature"]
         smaller = min(len(left["signature"]), len(right["signature"]))
-        if smaller < MIN_SIGNATURE and BROKEN.which != "M12":
+        if smaller < MIN_SIGNATURE and BROKEN.which != "M9":
             continue
         left_words, right_words = vocab[left["name"]][1], vocab[right["name"]][1]
         union = left_words | right_words
@@ -569,7 +566,7 @@ def verdict(pair: dict, max_overlap: float, min_shared: int) -> str:
     """
     if pair["containment"] <= max_overlap or len(pair["shared"]) < min_shared:
         return "ok"
-    if pair["handoff"] and (pair["containment"] < 1.0 or BROKEN.which == "M8"):
+    if pair["handoff"] and (pair["containment"] < 1.0 or BROKEN.which == "M5"):
         return "ok"
     return "REVIEW" if pair["authored"] else "WARN"
 
@@ -677,7 +674,7 @@ def against(fixture: dict, skills: list[dict], min_shared: int) -> list[dict]:
 def strongest(scored: list[dict], fixture: dict) -> dict:
     """The fixture's highest-scoring pair, or a named failure when it has none.
 
-    Not inlined as max(): M3 and M9 leave nothing for the fixture to be scored against, and
+    Not inlined as max(): M3 and M6 leave nothing for the fixture to be scored against, and
     a bare max() would end those mutations in a traceback rather than in the assertion that
     is supposed to catch them.
     """
@@ -760,6 +757,11 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
 
     Every way this check breaks is silent: a fence regex that stops matching scores every
     pair 0, which reads exactly like a catalog with no overlap.
+
+    check() fails the build and is restricted to facts a contribution cannot move: a
+    detector that stopped detecting, an exact subset, a number written twice and disagreeing.
+    note() prints calibration against today's tree - the threshold band, the hand-off edges
+    that exist - and never fails, because adding a skill changes all of it.
     """
     failures: list[str] = []
 
@@ -767,6 +769,14 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
         print(f"{'ok  ' if ok else 'FAIL'} {name} - {detail}")
         if not ok:
             failures.append(name)
+
+    def note(name: str, ok: bool, detail: str) -> None:
+        """Calibration against the catalog as it stands today, printed and never failed.
+
+        A contribution that only adds a skill can move every one of these, so failing them
+        would charge every contributor for the shape of the tree they arrived at.
+        """
+        print(f"{'ok  ' if ok else 'note'} {name} - {detail}")
 
     report = Report()
     skills = load_all(report)
@@ -790,19 +800,25 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
     check("every element kind is still extracted", not missing,
           ", ".join(missing) or f"cmd/flag/api/mod/path all seen across {len(skills)} skills")
 
+    router = as_skill({"name": "_fixture-router", "description": "",
+                       "body": "For the maintained path use _fixture-target.\n"})
+    target = as_skill({"name": "_fixture-target", "description": "", "body": "\n"})
+    check("a body that names another skill declares a hand-off",
+          mentions(router, target["name"]) and not mentions(target, router["name"])
+          and handoff_index([router, target])[router["name"]] == {target["name"]},
+          "one direction is enough, and the index agrees with the scan on the fixture pair")
+
     def edge(left: str, right: str) -> bool:
         return left in index and right in index and (
             mentions(index[left], right) or mentions(index[right], left)
         )
 
-    check("a mutually declared pair is seen as declared", edge("vllm-xpu-bench", "vllm-xpu-run"),
-          "vllm-xpu-bench and vllm-xpu-run name each other")
-    check("a one-directional hand-off counts", edge("vllm-xpu-run", "vllm-xpu-profile"),
-          "vllm-xpu-run names vllm-xpu-profile; the reverse is not required")
-    check("the torch pair is undeclared in both directions",
-          not edge("torch-xpu-run", "torch-xpu-profile"),
-          "neither skills/torch-xpu-run/SKILL.md nor skills/torch-xpu-profile/SKILL.md "
-          "names the other - independently confirmed by grep")
+    note("the catalog's hand-off edges are where they were",
+         edge("vllm-xpu-bench", "vllm-xpu-run") and edge("vllm-xpu-run", "vllm-xpu-profile")
+         and not edge("torch-xpu-run", "torch-xpu-profile"),
+         "the two vllm pairs name each other, the torch pair names neither - a note, because "
+         "writing the missing hand-off is the fix this check asks for and must not fail a "
+         "build")
 
     handoffs = handoff_index(skills)
     disagree = [
@@ -829,7 +845,7 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
         element for element, count in frequency.items()
         if count >= 10 and element not in PLATFORM and element not in IDENTITY
     )
-    check("no unclassified high-frequency element", not unclassified,
+    note("no unclassified high-frequency element", not unclassified,
           ", ".join(unclassified) or
           "every element at document frequency >= 10 is in PLATFORM or IDENTITY")
 
@@ -872,9 +888,9 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
         detail = (f"{measured}; worst undeclared pair {worst['left']}|{worst['right']} at "
                   f"{worst['containment']:.4f}")
     else:
-        # The fix is a number in a file the pull request that trips this almost certainly
-        # never touched, so name the file and the number instead of leaving them to be
-        # worked out from the source.
+        # A note, not a failure: the pull request that moves the ceiling is usually one that
+        # only added a skill, and it does not own this number. Name the file and the value so
+        # a maintainer can move it in one edit when they decide to.
         suggestion = suggested_threshold(ceiling)
         where = ", ".join(sorted({path for paths in copies.values() for path in paths})) \
             or workflow_name
@@ -889,7 +905,7 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
                      f"no step up to 0.90 leaves room above it: narrow {top_pair['left']} "
                      f"or {top_pair['right']} instead, since at {ceiling:.4f} one of the "
                      f"two nearly does everything the other does."))
-    check("the threshold sits just above the whole tree", in_band, detail)
+    note("the threshold sits just above the whole tree", in_band, detail)
 
     thin = sorted(
         skill["name"] for skill in skills
@@ -1062,19 +1078,13 @@ MUTATIONS = {
     "M1": "PLATFORM = set()",
     "M2": "read Python fences as shell",
     "M3": "delete the flag: regex",
-    # Spelled without the flag on purpose: --self-test scans the repository for
-    # `--max-overlap N` to catch a documented copy drifting, and these two would read as
-    # copies that disagree.
-    "M4": "gate the tree at 0.30, below what is already merged",
-    "M5": "gate the tree at 0.95, above anything short of a copy",
-    "M6": "inject a hand-off line into torch-xpu-profile",
-    "M7": "delete the hand-off line from vllm-xpu-run",
-    "M8": "let an inherited hand-off excuse a verbatim copy",
-    "M9": "score only pairs whose names share a part",
-    "M10": "index hand-offs from half of each body",
-    "M11": "let --advisory pass a copy",
-    "M12": f"score pairs under the {MIN_SIGNATURE}-action floor",
-    "M13": "report no pairs under the floor",
+    "M4": "stop detecting hand-offs, in both the scan and the index",
+    "M5": "let an inherited hand-off excuse a verbatim copy",
+    "M6": "score only pairs whose names share a part",
+    "M7": "index hand-offs from half of each body",
+    "M8": "let --advisory pass a copy",
+    "M9": f"score pairs under the {MIN_SIGNATURE}-action floor",
+    "M10": "report no pairs under the floor",
 }
 
 
@@ -1131,19 +1141,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mutate", choices=sorted(MUTATIONS),
                         help="break the detector on purpose and prove --self-test notices")
     return parser
-
-
-def mutated_threshold(max_overlap: float | None) -> float | None:
-    """M4 and M5 move the gate rather than the detector.
-
-    A threshold low enough to report the catalog, or high enough to report nothing, both
-    leave a self-test that only counts findings looking green.
-    """
-    if BROKEN.which == "M4":
-        return 0.30
-    if BROKEN.which == "M5":
-        return 0.95
-    return max_overlap
 
 
 def show_signature(skills: list[dict], name: str) -> int:
@@ -1211,7 +1208,7 @@ def subsumed_pairs(scored: list[dict]) -> list[dict]:
     section is still caught, and only a copy that *replaces* an action drops below, at
     (s-1)/s.
     """
-    if BROKEN.which == "M11":
+    if BROKEN.which == "M8":
         return []
     return [pair for pair in scored
             if pair["authored"] and pair["containment"] >= 1.0]
@@ -1318,7 +1315,7 @@ def main() -> int:
         sys.exit(f"FAIL no {SKILLS_DIR.relative_to(REPO_ROOT).as_posix()}")
 
     BROKEN.which = args.mutate
-    max_overlap = mutated_threshold(args.max_overlap)
+    max_overlap = args.max_overlap
     if BROKEN.which:
         print(f"# mutation {BROKEN.which}: {MUTATIONS[BROKEN.which]}")
 

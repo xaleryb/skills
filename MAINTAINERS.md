@@ -75,8 +75,9 @@ request is what leaves an agent nothing to route on. `--advisory` in CI, because
 two overlapping skills should win is a judgement about the catalog. One finding blocks even
 so: at containment 1.0 a skill authored here does nothing the other already does, so there
 is no division of labour to weigh — two imports at 1.0 stay a warning, because that repair
-lives upstream. Its `--self-test` does block, and `--mutate M1`…`M13` exist so that each way
-of breaking the detector can be shown to turn it red.
+lives upstream. Its `--self-test` does block — on the detector's liveness, not on any
+calibration against today's tree — and `--mutate M1`…`M10` exist so that each way of breaking
+the detector can be shown to turn it red.
 
 What it cannot do, measured rather than assumed:
 
@@ -103,15 +104,13 @@ What it cannot do, measured rather than assumed:
   share `cmd:double`, `cmd:i` and `cmd:int`, three loop variables out of a C snippet, for a
   containment of 1.0 over three actions. That is the only 1.0 pair in the tree, and the
   floor is why the one blocking finding does not fire on it.
-- **The threshold is not a constant to defend.** CI runs `--max-overlap 0.75`, in the
-  middle of the 1.0–1.5× band the self-test enforces around the highest-scoring pair in the
-  tree (0.6154 at 33 skills). That ceiling was measured to rise with the catalog — 0.36 at
-  12 skills, 0.56 at 20, 0.62 at 33, and anywhere from 0.64 to 0.82 with one more `dpnp-*`
-  skill added, depending on how many actions that skill carries — so the number is
-  deliberately not at the edge: at the edge, a pull request that only adds a sibling skill
-  fails the blocking self-test on this repository's workflow file. When the catalog does
-  grow into `--max-overlap 0.75`, the self-test prints the legal range and the exact value
-  to set, and it fails if any other file naming the flag names a different number.
+- **The threshold is not a constant to defend.** CI runs `--max-overlap 0.75`. `--self-test`
+  prints, as a note rather than a failure, whether it still sits in the 1.0–1.5× band above
+  the highest-scoring pair in the tree (0.6154 at 33 skills) and the value to set if not.
+  That ceiling rises with the catalog — 0.36 at 12 skills, 0.56 at 20, 0.62 at 33, and 0.64
+  to 0.82 with one more `dpnp-*` sibling — so a pull request that only added a skill can move
+  it, and does not own it. What does block is disagreement: every file naming the flag must
+  name the same number.
 - **There is a stricter run, and it is not the CI one.** Setting `--max-overlap` to zero and
   dropping `--advisory` fails on any undeclared pair touching a skill authored here, at any
   score. Useful when auditing a family of skills on purpose; wrong as a gate, because on

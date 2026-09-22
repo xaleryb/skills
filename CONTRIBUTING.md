@@ -232,11 +232,9 @@ settles nothing. A clean run is not a duplication check — it compares what a s
 what it says, so a section copied from another skill passes it and reaches a reviewer
 instead.
 
-There is one number you may be asked to move, and only when `--self-test` says so: adding a
-skill next to a family that already exists can raise the highest score in the catalog past
-`--max-overlap`, which fails the blocking `--self-test` step on this repository's workflow
-rather than on anything you wrote. The failure prints the legal range and the value to set,
-and names every file that has to change with it.
+You are never asked to move a threshold. If your skill raises the highest score in the
+catalog past `--max-overlap`, `--self-test` prints the new legal range as a note and the
+build stays green; moving the number is a maintainer's call.
 
 ### The security scan
 
