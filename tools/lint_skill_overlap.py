@@ -1205,9 +1205,14 @@ def report_undeclared(undeclared: list[dict], budget: float, args: argparse.Name
               + ("" if pair["authored"] else " (upstream - both are imported)"), file=stream)
         if args.advisory and os.environ.get("GITHUB_ACTIONS"):
             sys.stdout.flush()
-            ask = (f"Fix: {remedy}." if blocking else
-                   "Say in this pull request which one a request should route to, and why "
-                   "both belong.")
+            # Keyed on subsumption rather than on blocking, so an upstream copy is not
+            # asked for the hand-off the line above it has just ruled out.
+            if subsumed:
+                ask = f"Fix: {remedy}" + (
+                    "." if pair["authored"] else ", upstream - both are imported.")
+            else:
+                ask = ("Say in this pull request which one a request should route to, and "
+                       "why both belong.")
             print(f"::{'error' if blocking else 'warning'} "
                   f"file=skills/{pair['left']}/SKILL.md::{pair['left']} and "
                   f"{pair['right']} drive {len(pair['shared'])} of the same actions "
