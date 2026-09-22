@@ -36,7 +36,9 @@ A high score is not a defect by itself; a high score nobody documented is. Which
 overlapping skills should win is a judgement about the catalog, not about the bytes, so CI
 runs `--advisory`: findings are annotated on the pull request and the merge is not blocked.
 `--self-test` does block, because a detector that has stopped detecting is not a judgement
-call.
+call. One finding blocks under `--advisory` for the same reason: at containment 1.0 a skill
+authored here does nothing another already does, so there is no division of labour to weigh
+and nothing a hand-off could describe.
 """
 
 from __future__ import annotations
@@ -818,6 +820,25 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
           f"(hand-off {top_copy['handoff'] or 'none'}), reported anyway because at "
           f"containment 1.0 there is no division of labour for a hand-off to describe")
 
+    copy_scored = against(DECLARED_COPY, skills, min_shared)
+    blocked = subsumed_pairs(copy_scored, budget, min_shared)
+    committed = subsumed_pairs(scored, budget, min_shared)
+    check("a copy fails the gate even under --advisory",
+          bool(blocked) and not committed,
+          f"{len(blocked)} pair(s) block with the copy injected and {len(committed)} on "
+          f"skills/ as committed, whose highest judgeable pair is {ceiling:.4f} - a cliff "
+          f"with no traffic on it, not a line the catalog is drifting toward")
+
+    upstream = pairs(skills + [as_skill(DECLARED_COPY) | {"imported": True}],
+                     min_shared=min_shared)
+    upstream_top = strongest(upstream, DECLARED_COPY)
+    check("the same copy between two imports stays advisory",
+          verdict(upstream_top, budget, min_shared) == "WARN"
+          and not subsumed_pairs(upstream, budget, min_shared),
+          f"scores {upstream_top['containment']:.4f} against vllm-xpu-run and is a "
+          f"{verdict(upstream_top, budget, min_shared)}, so the merge is not blocked - that "
+          f"repair lives in someone else's repository")
+
     thin_pairs = [
         pair for pair in against(THIN, skills, min_shared)
         if THIN["name"] in (pair["left"], pair["right"])
@@ -880,6 +901,7 @@ MUTATIONS = {
     "M8": "let an inherited hand-off excuse a verbatim copy",
     "M9": "score only pairs whose names share a part",
     "M10": "index hand-offs from half of each body",
+    "M11": "let --advisory pass a copy",
 }
 
 
@@ -893,9 +915,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="a pair needs this many shared actions before it is judged")
     parser.add_argument("--advisory", action="store_true",
                         help="report and exit 0, annotating each finding for the pull "
-                             "request. How CI runs it: which of two overlapping skills wins "
-                             "is a judgement call, so it is put in front of a reviewer "
-                             "rather than made by a threshold.")
+                             "request, unless --strict is given or a pair with a skill "
+                             "authored here reaches containment 1.0. How CI runs it: which "
+                             "of two overlapping skills wins is a judgement call, so it is "
+                             "put in front of a reviewer rather than made by a threshold - "
+                             "but a skill that does nothing another already does leaves "
+                             "nothing to judge.")
     parser.add_argument("--show", metavar="SKILL", help="print one skill's signature")
     parser.add_argument("--top", type=int, default=15, metavar="N",
                         help="rows of the ranked table to print")
@@ -972,37 +997,62 @@ def undeclared_pairs(scored: list[dict], min_shared: int) -> list[dict]:
     ]
 
 
+def subsumed_pairs(scored: list[dict], budget: float, min_shared: int) -> list[dict]:
+    """The REVIEW pairs `--advisory` has nothing to defer: one skill does everything the
+    other does, so there is no division of labour for a reviewer to weigh and nothing a
+    hand-off could say. Which of two overlapping skills wins is a judgement about the
+    catalog; that one of them is a copy is not, which is the argument that makes
+    `--self-test` block.
+
+    Reads verdict() rather than containment alone, so the scoping is inherited: an upstream
+    pair is a WARN and stays advisory, because the repair is in someone else's repository.
+    len(shared) == smaller is exact in binary floating point at every signature size, so
+    >= 1.0 is the subset test it looks like - a copy that appends a section is still caught,
+    and only a copy that *replaces* an action drops below, at (s-1)/s.
+    """
+    if BROKEN.which == "M11":
+        return []
+    return [
+        pair for pair in scored
+        if verdict(pair, budget, min_shared) == "REVIEW" and pair["containment"] >= 1.0
+    ]
+
+
 def report_undeclared(undeclared: list[dict], budget: float, args: argparse.Namespace) -> None:
     """One block per finding, on stderr only when the gate is enforcing it as a failure."""
     for pair in undeclared:
         over = verdict(pair, budget, args.min_shared) == "REVIEW"
-        stream = sys.stderr if over and not args.advisory else sys.stdout
         subsumed = pair["containment"] >= 1.0
+        blocking = over and (subsumed or not args.advisory)
+        stream = sys.stderr if blocking else sys.stdout
         because = ("everything the smaller one does, the larger one already does, so the "
                    "hand-off cannot be what separates them"
                    if subsumed else "no hand-off in either direction")
-        fix = ("fix: drop one, or narrow one so it stops being contained in the other"
-               if subsumed else "fix: name the other skill in one of the two descriptions")
+        remedy = ("drop one, or narrow one so it stops being contained in the other"
+                  if subsumed else "name the other skill in one of the two descriptions")
         sys.stdout.flush()  # or the buffered table lands after the unbuffered failures
         print(f"\n{'REVIEW' if over else 'WARN  '} overlap {pair['containment']:.4f} "
               f"{pair['left']} | {pair['right']}: {because}.", file=stream)
         print(f"       shared ({len(pair['shared'])}): " + ", ".join(pair["shared"]),
               file=stream)
-        print(f"       {fix}"
+        print(f"       fix: {remedy}"
               + ("" if pair["authored"] else " (upstream - both are imported)"), file=stream)
         if args.advisory and os.environ.get("GITHUB_ACTIONS"):
             sys.stdout.flush()
-            print(f"::warning file=skills/{pair['left']}/SKILL.md::{pair['left']} and "
+            ask = (f"Fix: {remedy}." if blocking else
+                   "Say in this pull request which one a request should route to, and why "
+                   "both belong.")
+            print(f"::{'error' if blocking else 'warning'} "
+                  f"file=skills/{pair['left']}/SKILL.md::{pair['left']} and "
                   f"{pair['right']} drive {len(pair['shared'])} of the same actions "
-                  f"(containment {pair['containment']:.2f}). {because.capitalize()}. "
-                  f"Say in this pull request which one a request should route to, and why "
-                  f"both belong.")
+                  f"(containment {pair['containment']:.2f}). {because.capitalize()}. {ask}")
 
 
 def summarize(skills: list[dict], scored: list[dict], undeclared: list[dict],
               budget: float, args: argparse.Namespace) -> int:
     """The last line and the exit code. REVIEW names the pairs someone here can fix."""
     needs_review = [p for p in scored if verdict(p, budget, args.min_shared) == "REVIEW"]
+    subsumed = subsumed_pairs(scored, budget, args.min_shared)
     print()
     sys.stdout.flush()
     if needs_review and not args.advisory:
@@ -1019,10 +1069,20 @@ def summarize(skills: list[dict], scored: list[dict], undeclared: list[dict],
         print(f"REVIEW {summary}. {len(needs_review)} of them are over {budget:.2f} with a skill "
               f"authored here: "
               + ", ".join(f"{p['left']}|{p['right']}" for p in needs_review)
-              + ". Advisory - which skill wins is a reviewer's call, not this check's, so "
-                "the merge is not blocked.")
+              + (". Advisory - which skill wins is a reviewer's call, not this check's, so "
+                 "the merge is not blocked." if not subsumed else "."))
     else:
         print(f"OK {summary}, none over {budget:.2f}.")
+    if subsumed:
+        sys.stdout.flush()
+        print(f"FAIL {len(subsumed)} pair(s) where a skill authored here does nothing the "
+              "other does not: "
+              + ", ".join(f"{p['left']}|{p['right']} at {p['containment']:.4f}"
+                          for p in subsumed)
+              + ". --advisory defers which of two overlapping skills a request should route "
+                "to; it does not defer whether one of them is a copy. Drop one, or narrow "
+                "one so it stops being contained in the other.", file=sys.stderr)
+        return 1
     return 1 if args.strict and undeclared else 0
 
 

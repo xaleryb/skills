@@ -91,6 +91,11 @@ jobs:
       # restatement in prose it cannot see at all. The step above does block, because a
       # detector that has stopped detecting is not a judgement call.
       #
+      # One finding blocks even so: containment 1.0 on a pair with a skill authored here
+      # means that skill does nothing the other already does, so there is no division of
+      # labour to weigh and nothing a hand-off could describe. Two imports at 1.0 stay a
+      # warning, because the repair is in someone else's repository.
+      #
       # It also prints a short queue ranked by name and description overlap alone, covering
       # the pairs with too little code to compare — a reading order only, since on this tree
       # that ranking agrees with the action score on 2 pairs of 14 and would drop 4 of them
@@ -101,7 +106,8 @@ jobs:
       # reported. It is not a constant to be defended: that ceiling was measured to rise
       # with the catalog — 0.36 at 12 skills, 0.56 at 20, 0.62 at 33 — so the self-test
       # bounds the threshold to 1.0-1.5x of it and asks for this number to move up when
-      # the catalog grows into it. A verbatim copy scores 1.0 and is reported regardless.
+      # the catalog grows into it. A verbatim copy scores 1.0 whatever this number is, so
+      # the one blocking finding does not depend on it.
       - name: Skill overlap
         run: python3 tools/lint_skill_overlap.py --max-overlap 0.65 --min-shared 8 --advisory
 

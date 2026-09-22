@@ -221,7 +221,8 @@ Only `--check-links` and `sync_external.py --check` reach the network. If the of
 pass, the blocking checks left are about the repository rather than your text: the workflow
 linters and the installer round trip.
 
-The last one does not block and is worth running anyway: it lists the skills that drive the
+The last one blocks on one finding only — a skill of yours that does nothing another
+already does — and is worth running anyway for the rest: it lists the skills that drive the
 same commands, flags and API calls as yours without either description saying which one a
 request should route to. Answer it in the pull request rather than by editing a number —
 two skills sharing a tool is normal here, two skills competing silently for the same
@@ -345,8 +346,10 @@ HIGH/CRITICAL finding in a skill whose score is still within its threshold, and 
 skills that drive the same actions with no hand-off written between them. The last is
 annotated on the pull request and left to the reviewer, because which of two overlapping
 skills should win is a judgement about the catalog rather than about the bytes. What does
-block is that check's own self-test: a detector that has stopped detecting reports a clean
-zero for every pair, which reads exactly like a catalog with no duplication.
+block is a skill of yours that does nothing another already does — there is no division of
+labour left to judge — and that check's own self-test: a detector that has stopped
+detecting reports a clean zero for every pair, which reads exactly like a catalog with no
+duplication.
 
 ## Evaluation levels
 

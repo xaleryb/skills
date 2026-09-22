@@ -72,9 +72,11 @@ duplicates": do they drive the same commands, flags, environment variables, API 
 endpoint paths, and does neither description name the other? Two skills sharing a tool is
 normal here and most of the catalog does it; two skills competing silently for the same
 request is what leaves an agent nothing to route on. `--advisory` in CI, because which of
-two overlapping skills should win is a judgement about the catalog. Its `--self-test` does
-block, and `--mutate M1`…`M10` exist so that each way of breaking the detector can be shown
-to turn it red.
+two overlapping skills should win is a judgement about the catalog. One finding blocks even
+so: at containment 1.0 a skill authored here does nothing the other already does, so there
+is no division of labour to weigh — two imports at 1.0 stay a warning, because that repair
+lives upstream. Its `--self-test` does block, and `--mutate M1`…`M11` exist so that each way
+of breaking the detector can be shown to turn it red.
 
 What it cannot do, measured rather than assumed:
 
@@ -252,7 +254,7 @@ the fix, the pin is the wrong pin.
 | Workflow | Job | Runs on | Blocks? |
 |---|---|---|---|
 | `validate.yml` | `validate` — `validate_skills.py`, `run_evals.py --validate`, task leakage and its self-test, the overlap self-test, link check | every PR | yes |
-| `validate.yml` | `validate` — skill overlap, `--advisory` | every PR | no, annotates |
+| `validate.yml` | `validate` — skill overlap, `--advisory` | every PR | only on containment 1.0 |
 | `validate.yml` | `install` — the installer resolves, lists, and installs from the catalog | every PR | yes |
 | `harbor-smoke.yml` | the oracle arm over every task in `tasks/` | PRs touching tasks or skills | yes |
 | `security.yml` | `actionlint`, `zizmor` | every PR | yes |
@@ -293,7 +295,7 @@ network and both say so when they cannot: `validate_skills.py --check-links` and
 | `compare_harbor_skill.py` | runs and reports the three-arm differential, with cost and time |
 | `check_harbor_job.py` | asserts a harbor run's trial count and reward floor |
 | `lint_task_leakage.py` | ranks how much of its own answer each task's instruction leaks; blocks above 5 in CI, and `--self-test` asserts against this tree that the detector behind that number still detects |
-| `lint_skill_overlap.py` | reports skill pairs that drive the same actions with no hand-off written between them; advisory in CI, while `--self-test` blocks and `--mutate` proves it fails when broken |
+| `lint_skill_overlap.py` | reports skill pairs that drive the same actions with no hand-off written between them; advisory in CI except on a pair with a skill authored here at containment 1.0, while `--self-test` blocks and `--mutate` proves it fails when broken |
 | `behavior_digest.py` | digests the skill bytes a measurement was taken against, so a later edit to `SKILL.md` cannot leave `perf/` describing text that no longer exists |
 
 Two more exist for the imported skills: `sync_external.py` regenerates a copy from its pin
