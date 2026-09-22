@@ -106,11 +106,18 @@ What it cannot do, measured rather than assumed:
 - **The threshold is not a constant to defend.** CI runs `--max-overlap 0.75`, in the
   middle of the 1.0–1.5× band the self-test enforces around the highest-scoring pair in the
   tree (0.6154 at 33 skills). That ceiling was measured to rise with the catalog — 0.36 at
-  12 skills, 0.56 at 20, 0.62 at 33, and 0.6923 with one more `dpnp-*` skill added — so the
-  number is deliberately not at the edge: at the edge, a pull request that only adds a
-  sibling skill fails the blocking self-test on this repository's workflow file. When the
-  catalog does grow into 0.75, the self-test prints the legal range and the exact value to
-  set, and it fails if any other file naming the flag names a different number.
+  12 skills, 0.56 at 20, 0.62 at 33, and anywhere from 0.64 to 0.82 with one more `dpnp-*`
+  skill added, depending on how many actions that skill carries — so the number is
+  deliberately not at the edge: at the edge, a pull request that only adds a sibling skill
+  fails the blocking self-test on this repository's workflow file. When the catalog does
+  grow into `--max-overlap 0.75`, the self-test prints the legal range and the exact value
+  to set, and it fails if any other file naming the flag names a different number.
+- **There is a stricter run, and it is not the CI one.** Setting `--max-overlap` to zero and
+  dropping `--advisory` fails on any undeclared pair touching a skill authored here, at any
+  score. Useful when auditing a family of skills on purpose; wrong as a gate, because on
+  this tree every judged pair reports and the signal stops being a signal. Spelled out in
+  prose rather than as a command, because the drift check below reads any `--max-overlap`
+  value it finds in a text file as a copy of the gate's number.
 
 ## Level 2 — the differential
 

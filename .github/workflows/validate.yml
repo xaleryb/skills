@@ -107,9 +107,10 @@ jobs:
       # measured to rise with the catalog — 0.36 at 12 skills, 0.56 at 20, 0.62 at 33. At
       # the lower edge one more dpnp-* skill reusing dpnp.array/asnumpy/arange pushes the
       # ceiling past it and fails the blocking step above on a pull request that only added
-      # a skill — measured at 0.6923 for a ninth such skill, which declared its hand-offs
-      # and was counted anyway, because the band is calibrated on every judgeable pair and
-      # not only the undeclared ones. Mid-band absorbs that; when it no longer does, the
+      # a skill — measured at 0.64 to 0.82 across three such siblings, all of which declared
+      # their hand-offs and were counted anyway, because the band is calibrated on every
+      # judgeable pair and not only the undeclared ones. Mid-band absorbs most of that
+      # range, and 0.82 is the case it does not; when it no longer does, the
       # self-test prints the legal range and the value to put here. A verbatim copy scores
       # 1.0 whatever this number is, so the one blocking finding does not depend on it.
       - name: Skill overlap

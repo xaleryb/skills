@@ -26,13 +26,10 @@ claims to catch a paraphrase, it is lying. This one claims something smaller and
 and what would narrow the gap is a second axis over the text itself - not a wider threshold
 on this one, which reports legitimate siblings and still cannot see a copy.
 
-Duplicated *text* is inside that blind spot, not next to it, so the score is not a
-duplication score and a low one is not a clean bill. `torch-xpu-bench` and
-`vllm-xpu-bench` carry the same `## Env vars` table — the same four variables in the same
-order, two rows byte-identical — and this scores the pair 0.0833: one of those variables is
-in PLATFORM by design, and a table of them is prose either way. A reviewer reading both
-files sees it immediately, which is the division of labour, and the OK line says so - that
-is the line at risk of being read as a clean bill.
+Duplicated *text* is inside that blind spot, not next to it, so a low score is not a clean
+bill: `torch-xpu-bench` and `vllm-xpu-bench` carry the same `## Env vars` table — four
+variables in the same order, two rows byte-identical — and this scores the pair 0.0833. The
+OK line says so, because that is the line at risk of being read as a verdict on duplication.
 
 Which is why the name and the description are also read, but only to order a queue of the
 pairs the action axis cannot judge — a skill with no code still has both. They decide
@@ -704,10 +701,18 @@ def threshold_copies() -> dict[float, list[str]]:
     thought of is the drift this exists to catch, and a hand-list here would itself be one
     more thing to keep in step. skills/ is skipped - a skill body is content, and a skill
     that ever teaches this flag should not be able to fail the gate's own calibration.
+
+    The rule that follows from the walk, and it is a rule rather than an accident: any
+    --max-overlap value written anywhere outside skills/ is a copy of the gate's number, so
+    a documented example at some other value is drift. Describe another run in prose, or
+    document it at the gate's own number.
     """
     found: dict[float, list[str]] = {}
     for base, directories, names in os.walk(REPO_ROOT):
-        directories[:] = sorted(d for d in directories if d not in (".git", "skills"))
+        # Dotted directories other than .github are not the repository: a worktree under
+        # .worktrees/ holds an older copy of the workflow, and that is not drift.
+        directories[:] = sorted(d for d in directories if d != "skills"
+                                and (d == ".github" or not d.startswith(".")))
         for name in sorted(names):
             path = Path(base) / name
             if path.suffix not in THRESHOLD_TEXT:
@@ -738,15 +743,16 @@ def refuses(value: str) -> str:
 def suggested_threshold(ceiling: float) -> float | None:
     """The 0.05 step to put in the workflow for a tree with this ceiling, or None.
 
-    Not the next step above the ceiling: at the edge of the band the skill after this one
-    moves it again, which is the whole reason this function exists. 1.15x leaves room for
-    one more sibling and stays inside the 1.5x the band allows. Nothing above 0.90 is
-    offered - a ceiling that high means two skills are close to subsumption, and the answer
-    there is to narrow one of them, not to raise a number until it stops reporting them.
+    Not the next step above the ceiling where there is a choice: at the edge of the band the
+    skill after this one moves it again, which is the whole reason this function exists. So
+    1.15x first, and only then the lowest step the band allows - a high ceiling leaves no
+    room for the margin (1.15 * 0.8182 = 0.94 is outside the band at all), and answering
+    None there would fail the blocking self-test with no legal number to name. Above 0.90
+    nothing is offered, because there two skills are close to subsumption and the answer is
+    to narrow one of them rather than to raise a number until it stops reporting them.
     """
-    room = [step / 20 for step in range(2, 19)
-            if ceiling < step / 20 <= 1.5 * ceiling and step / 20 >= 1.15 * ceiling]
-    return min(room) if room else None
+    room = [step / 20 for step in range(2, 19) if ceiling < step / 20 <= 1.5 * ceiling]
+    return min([v for v in room if v >= 1.15 * ceiling] or room) if room else None
 
 
 def self_test(max_overlap: float | None, min_shared: int) -> int:
@@ -902,18 +908,19 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
          if (smaller := min(len(left["signature"]), len(right["signature"])))
          < MIN_SIGNATURE),
         key=lambda row: len(row[0]) / row[1])
-    noise = hidden[-1]
+    # An empty floor is a pass, not a break: a catalog where every skill carries
+    # MIN_SIGNATURE actions removes no pair, and there is then no strongest removed pair.
+    noise = hidden[-1] if hidden else None
     check("the action floor is a property of a skill, not of a pair",
           len(hidden) + len(scored) == len(skills) * (len(skills) - 1) // 2
-          and below_floor(skills) == len(hidden)
-          and len(noise[0]) / noise[1] >= 1.0,
+          and below_floor(skills) == len(hidden),
           f"{len(hidden)} removed + {len(scored)} scored of "
           f"{len(skills) * (len(skills) - 1) // 2} pair(s), {below_floor(skills)} of them "
-          f"reported as removed; the strongest removed pair is "
-          f"{noise[2]['name']} | {noise[3]['name']} at "
-          f"{len(noise[0]) / noise[1]:.4f} on {', '.join(sorted(noise[0]))} - loop "
-          f"variables out of a C snippet, which is what a containment ratio over "
-          f"{noise[1]} action(s) is worth")
+          f"reported as removed"
+          + (f"; the strongest removed pair is {noise[2]['name']} | {noise[3]['name']} at "
+             f"{len(noise[0]) / noise[1]:.4f} on {', '.join(sorted(noise[0]))}, which is "
+             f"what a containment ratio over {noise[1]} action(s) is worth"
+             if noise else " - no skill is under the floor"))
 
     check("--min-shared under the floor is refused, not clipped",
           bool(refuses(str(MIN_SIGNATURE - 1))) and not refuses(str(MIN_SIGNATURE)),
@@ -962,20 +969,39 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
           f"containment 1.0 there is no division of labour for a hand-off to describe")
 
     copy_scored = against(DECLARED_COPY, skills, min_shared)
-    blocked = subsumed_pairs(copy_scored, budget, min_shared)
-    committed = subsumed_pairs(scored, budget, min_shared)
+    blocked = subsumed_pairs(copy_scored)
+    committed = subsumed_pairs(scored)
     check("a copy fails the gate even under --advisory",
           bool(blocked) and not committed,
           f"{len(blocked)} pair(s) block with the copy injected and {len(committed)} on "
           f"skills/ as committed, whose highest judgeable pair is {ceiling:.4f} - a cliff "
-          f"with no traffic on it, not a line the catalog is drifting toward")
+          f"with no traffic on it, not a line the catalog is drifting toward"
+          + (f". The gate reports the same pair(s) with the same fix, and that report is the "
+             f"one to read: " + ", ".join(f"{p['left']}|{p['right']}" for p in committed)
+             if committed else ""))
+
+    # The reach of --min-shared is not the reach of the copy rule, and inheriting it was a
+    # real hole: 4 of the 33 skills carry too few actions for a verbatim copy of them to
+    # share 8 of anything. Built from the thinnest skill the catalog has rather than from an
+    # inline fixture, so it keeps testing whatever the thin end of the catalog becomes.
+    thinnest = min((s for s in skills if MIN_SIGNATURE <= len(s["signature"]) < min_shared),
+                   key=lambda s: len(s["signature"]), default=None)
+    if thinnest:
+        clone = {**thinnest, "name": f"{thinnest['name']}-copy", "imported": False}
+        thin_copy = subsumed_pairs(pairs(skills + [clone], min_shared=min_shared))
+        check("a copy under the --min-shared reach still fails the gate",
+              any(clone["name"] in (pair["left"], pair["right"]) for pair in thin_copy),
+              f"a verbatim copy of {thinnest['name']} shares its "
+              f"{len(thinnest['signature'])} action(s), under --min-shared {min_shared}, and "
+              f"{len(thin_copy)} pair(s) block - scoring it ok because it is too small to be "
+              f"a near-miss is how a copy merged green")
 
     upstream = pairs(skills + [as_skill(DECLARED_COPY) | {"imported": True}],
                      min_shared=min_shared)
     upstream_top = strongest(upstream, DECLARED_COPY)
     check("the same copy between two imports stays advisory",
           verdict(upstream_top, budget, min_shared) == "WARN"
-          and not subsumed_pairs(upstream, budget, min_shared),
+          and not subsumed_pairs(upstream),
           f"scores {upstream_top['containment']:.4f} against vllm-xpu-run and is a "
           f"{verdict(upstream_top, budget, min_shared)}, so the merge is not blocked - that "
           f"repair lives in someone else's repository")
@@ -1096,7 +1122,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "pairs the action axis cannot judge. A reading order, not a "
                              "verdict - and the dial for anything downstream that pays per "
                              "pair, since all-pairs is 44850 comparisons at 300 skills.")
-    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--json", action="store_true",
+                        help="every scored pair and the lexical queue as one object, for "
+                             "reproducing a number in this file's docstring")
     parser.add_argument("--self-test", action="store_true",
                         help="assert the detector still detects, against skills/ as "
                              "committed. Writes nothing. Run it before the gate.")
@@ -1158,38 +1186,46 @@ def undeclared_pairs(scored: list[dict], min_shared: int) -> list[dict]:
     """
     return [
         pair for pair in scored
-        if len(pair["shared"]) >= min_shared
+        if (len(pair["shared"]) >= min_shared or pair["containment"] >= 1.0)
         and (not pair["handoff"] or pair["containment"] >= 1.0)
     ]
 
 
-def subsumed_pairs(scored: list[dict], budget: float, min_shared: int) -> list[dict]:
+def subsumed_pairs(scored: list[dict]) -> list[dict]:
     """The REVIEW pairs `--advisory` has nothing to defer: one skill does everything the
     other does, so there is no division of labour for a reviewer to weigh and nothing a
     hand-off could say. Which of two overlapping skills wins is a judgement about the
     catalog; that one of them is a copy is not, which is the argument that makes
     `--self-test` block.
 
-    Reads verdict() rather than containment alone, so the scoping is inherited: an upstream
-    pair is a WARN and stays advisory, because the repair is in someone else's repository.
-    len(shared) == smaller is exact in binary floating point at every signature size, so
-    >= 1.0 is the subset test it looks like - a copy that appends a section is still caught,
-    and only a copy that *replaces* an action drops below, at (s-1)/s.
+    Not routed through verdict(), which would inherit --min-shared: a copy of a 7-action
+    skill shares 7 actions, and under `--min-shared 8` the gate scored it "ok" and merged
+    it green - measured on xpu-discover, which is one of the 4 skills thin enough for that.
+    --min-shared is a reach for near-misses, and a subset is not a near-miss. MIN_SIGNATURE
+    stays the only floor, and it is load-bearing: linux-perf | onetbb-quickstart is a real
+    1.0 over three C loop variables.
+
+    `authored` is the scoping that remains, because the repair for an upstream copy is in
+    someone else's repository. len(shared) == smaller is exact in binary floating point at
+    every signature size, so >= 1.0 is the subset test it looks like - a copy that appends a
+    section is still caught, and only a copy that *replaces* an action drops below, at
+    (s-1)/s.
     """
     if BROKEN.which == "M11":
         return []
-    return [
-        pair for pair in scored
-        if verdict(pair, budget, min_shared) == "REVIEW" and pair["containment"] >= 1.0
-    ]
+    return [pair for pair in scored
+            if pair["authored"] and pair["containment"] >= 1.0]
 
 
 def report_undeclared(undeclared: list[dict], budget: float, args: argparse.Namespace) -> None:
     """One block per finding, on stderr only when the gate is enforcing it as a failure."""
     for pair in undeclared:
-        over = verdict(pair, budget, args.min_shared) == "REVIEW"
         subsumed = pair["containment"] >= 1.0
-        blocking = over and (subsumed or not args.advisory)
+        # A copy is reported on its own terms, not through --min-shared: a copy of a
+        # 7-action skill shares 7 actions and would otherwise print nothing at all.
+        blocks_as_copy = subsumed and pair["authored"] and args.max_overlap is not None
+        over = verdict(pair, budget, args.min_shared) == "REVIEW" or blocks_as_copy
+        blocking = blocks_as_copy or (over and not args.advisory)
         stream = sys.stderr if blocking else sys.stdout
         because = ("everything the smaller one does, the larger one already does, so the "
                    "hand-off cannot be what separates them"
@@ -1213,17 +1249,24 @@ def report_undeclared(undeclared: list[dict], budget: float, args: argparse.Name
             else:
                 ask = ("Say in this pull request which one a request should route to, and "
                        "why both belong.")
-            print(f"::{'error' if blocking else 'warning'} "
-                  f"file=skills/{pair['left']}/SKILL.md::{pair['left']} and "
-                  f"{pair['right']} drive {len(pair['shared'])} of the same actions "
-                  f"(containment {pair['containment']:.2f}). {because.capitalize()}. {ask}")
+            # Both sides of a copy. One of the two names is alphabetically first and the
+            # other is the file the pull request added; annotating only the first showed the
+            # finding on an untouched file, where GitHub renders nothing inline.
+            for on in ([pair["left"], pair["right"]] if subsumed else [pair["left"]]):
+                print(f"::{'error' if blocking else 'warning'} "
+                      f"file=skills/{on}/SKILL.md::{pair['left']} and "
+                      f"{pair['right']} drive {len(pair['shared'])} of the same actions "
+                      f"(containment {pair['containment']:.2f}). {because.capitalize()}. "
+                      f"{ask}")
 
 
 def summarize(skills: list[dict], scored: list[dict], undeclared: list[dict],
               budget: float, args: argparse.Namespace) -> int:
     """The last line and the exit code. REVIEW names the pairs someone here can fix."""
     needs_review = [p for p in scored if verdict(p, budget, args.min_shared) == "REVIEW"]
-    subsumed = subsumed_pairs(scored, budget, args.min_shared)
+    # Report-only is report-only: --max-overlap's help promises it, and a run somebody
+    # started to look around the catalog is not the run that should decide a merge.
+    subsumed = subsumed_pairs(scored) if args.max_overlap is not None else []
     print()
     sys.stdout.flush()
     if needs_review and not args.advisory:
@@ -1241,10 +1284,13 @@ def summarize(skills: list[dict], scored: list[dict], undeclared: list[dict],
                f"floor, {len(undeclared)} undeclared overlap(s) reported")
     if worst:
         summary += f", worst {worst['left']} | {worst['right']} at {worst['containment']:.4f}"
-    if needs_review:
-        print(f"REVIEW {summary}. {len(needs_review)} of them are over {budget:.2f} with a skill "
-              f"authored here: "
-              + ", ".join(f"{p['left']}|{p['right']}" for p in needs_review)
+    # A copy is reported whether or not it reaches --min-shared, so the last line counts it
+    # too: an OK line printed above a FAIL line is worse than either of them alone.
+    flagged = needs_review + [p for p in subsumed if p not in needs_review]
+    if flagged:
+        print(f"REVIEW {summary}. {len(flagged)} of them touch a skill authored here, over "
+              f"{budget:.2f} or contained outright: "
+              + ", ".join(f"{p['left']}|{p['right']}" for p in flagged)
               + (". Advisory - which skill wins is a reviewer's call, not this check's, so "
                  "the merge is not blocked." if not subsumed else "."))
     else:
