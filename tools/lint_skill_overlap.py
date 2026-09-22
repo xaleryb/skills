@@ -44,6 +44,8 @@ and nothing a hand-off could describe.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import re
@@ -54,6 +56,14 @@ from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = REPO_ROOT / "skills"
+# The two floors are different kinds of thing and only one of them is a flag. --min-shared
+# is a property of a pair: how much they have in common. This is a property of one skill's
+# signature, and decides whether the pair is scored at all - under five actions a
+# containment ratio is arithmetic on noise. linux-perf and onetbb-quickstart share
+# cmd:double, cmd:i and cmd:int, three loop variables out of a C snippet, for a containment
+# of 1.0 against onetbb-quickstart's three actions: the only 1.0 pair in this tree, and the
+# floor is the whole reason the gate does not block on it.
+MIN_SIGNATURE = 5
 # --self-test reads the threshold out of the workflow rather than keeping a second copy, and
 # asserts that every other file documenting the gate names the same number.
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
@@ -423,9 +433,21 @@ def vocabulary(skills: list[dict]) -> dict[str, tuple[set[str], set[str]]]:
     }
 
 
+def below_floor(skills: list[dict]) -> int:
+    """How many pairs MIN_SIGNATURE removes from the budget, without enumerating them.
+
+    Every pair touching a skill under the floor, counted once: each thin skill against
+    every thick one, plus the thin ones among themselves.
+    """
+    thin = sum(1 for skill in skills if len(skill["signature"]) < MIN_SIGNATURE)
+    if BROKEN.which == "M13":
+        return 0
+    return thin * (len(skills) - thin) + thin * (thin - 1) // 2
+
+
 def pairs(skills: list[dict], min_shared: int,
           index: dict[str, set[str]] | None = None) -> list[dict]:
-    """Score every pair. Under five actions on the smaller side there is too little
+    """Score every pair. Under MIN_SIGNATURE actions on the smaller side there is too little
     material to mean anything either way, so the pair is not scored at all.
 
     Name and description overlap ride along as columns because they are nearly free once
@@ -444,7 +466,7 @@ def pairs(skills: list[dict], min_shared: int,
             continue
         shared = left["signature"] & right["signature"]
         smaller = min(len(left["signature"]), len(right["signature"]))
-        if smaller < 5:
+        if smaller < MIN_SIGNATURE and BROKEN.which != "M12":
             continue
         left_words, right_words = vocab[left["name"]][1], vocab[right["name"]][1]
         union = left_words | right_words
@@ -488,7 +510,7 @@ def lexical(skills: list[dict], min_shared: int,
     for left, right in combinations(skills, 2):
         shared = left["signature"] & right["signature"]
         smaller = min(len(left["signature"]), len(right["signature"]))
-        if smaller >= 5 and len(shared) >= min_shared:
+        if smaller >= MIN_SIGNATURE and len(shared) >= min_shared:
             continue
         if right["name"] in index.get(left["name"], ()) or \
                 left["name"] in index.get(right["name"], ()):
@@ -687,6 +709,22 @@ def threshold_copies() -> dict[float, list[str]]:
     return found
 
 
+def refuses(value: str) -> str:
+    """argparse's message for a rejected --min-shared, or "" if the parser accepted it.
+
+    Through the parser rather than through shared_actions() directly, because what could
+    regress is the wiring: with `type=int` back in place the flag takes 3 and reports fewer
+    pairs, which reads like a stricter run rather than a narrower one.
+    """
+    stderr = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(stderr):
+            build_parser().parse_args(["--min-shared", value])
+    except SystemExit:
+        return " ".join(stderr.getvalue().split()).partition("error: ")[2]
+    return ""
+
+
 def suggested_threshold(ceiling: float) -> float | None:
     """The 0.05 step to put in the workflow for a tree with this ceiling, or None.
 
@@ -845,6 +883,34 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
           ", ".join(thin) or "none - every skill carries at least "
           f"{min_shared} actions")
 
+    # The other floor, and the one that is not a flag. Asserted through the pair budget
+    # because that is where it is visible: the summary line adds up only while every pair
+    # the floor removes is a pair pairs() declined to score.
+    hidden = sorted(
+        ((left["signature"] & right["signature"], smaller, left, right)
+         for left, right in combinations(skills, 2)
+         if (smaller := min(len(left["signature"]), len(right["signature"])))
+         < MIN_SIGNATURE),
+        key=lambda row: len(row[0]) / row[1])
+    noise = hidden[-1]
+    check("the action floor is a property of a skill, not of a pair",
+          len(hidden) + len(scored) == len(skills) * (len(skills) - 1) // 2
+          and below_floor(skills) == len(hidden)
+          and len(noise[0]) / noise[1] >= 1.0,
+          f"{len(hidden)} removed + {len(scored)} scored of "
+          f"{len(skills) * (len(skills) - 1) // 2} pair(s), {below_floor(skills)} of them "
+          f"reported as removed; the strongest removed pair is "
+          f"{noise[2]['name']} | {noise[3]['name']} at "
+          f"{len(noise[0]) / noise[1]:.4f} on {', '.join(sorted(noise[0]))} - loop "
+          f"variables out of a C snippet, which is what a containment ratio over "
+          f"{noise[1]} action(s) is worth")
+
+    check("--min-shared under the floor is refused, not clipped",
+          bool(refuses(str(MIN_SIGNATURE - 1))) and not refuses(str(MIN_SIGNATURE)),
+          refuses(str(MIN_SIGNATURE - 1))
+          or f"--min-shared {MIN_SIGNATURE - 1} was accepted, and the pairs it asks for are "
+             f"the ones the {MIN_SIGNATURE}-action floor already removed")
+
     # The cheap precondition is a ranking, never a filter. Without this, the obvious
     # optimisation - only compare skills whose names share a part - looks free and is not.
     blind = [
@@ -911,7 +977,8 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
     flagged = [pair for pair in thin_pairs if verdict(pair, budget, min_shared) == "REVIEW"]
     check("a thin restatement passes, and that is the documented limit",
           not flagged and not thin_pairs,
-          f"its {len(as_skill(THIN)['signature'])} action(s) are under the 5-action floor, "
+          f"its {len(as_skill(THIN)['signature'])} action(s) are under the "
+          f"{MIN_SIGNATURE}-action floor, "
           f"so it is never scored at all: a 20-line skill that restates a real one in its "
           f"own words is out of this check's reach by construction, not by accident")
 
@@ -970,7 +1037,26 @@ MUTATIONS = {
     "M9": "score only pairs whose names share a part",
     "M10": "index hand-offs from half of each body",
     "M11": "let --advisory pass a copy",
+    "M12": f"score pairs under the {MIN_SIGNATURE}-action floor",
+    "M13": "report no pairs under the floor",
 }
+
+
+def shared_actions(value: str) -> int:
+    """--min-shared, refused below the floor rather than silently clipped to it.
+
+    Asking for fewer shared actions than a signature needs to be scored at all reads like a
+    request for more sensitivity and delivers none: the pairs it would reach are the ones
+    MIN_SIGNATURE already removed, and they are listed by --queue instead.
+    """
+    count = int(value)
+    if count < MIN_SIGNATURE:
+        raise argparse.ArgumentTypeError(
+            f"{count} is below the {MIN_SIGNATURE}-action floor a signature needs before any "
+            f"pair it is in is scored, so nothing under {MIN_SIGNATURE} widens what is "
+            f"judged; pass {MIN_SIGNATURE} or more, and see --queue N for the pairs under "
+            "the floor")
+    return count
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -979,8 +1065,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-overlap", type=float, default=None, metavar="F",
                         help="the line above which an undeclared pair is worth a reviewer's "
                              "attention. Omit to report only.")
-    parser.add_argument("--min-shared", type=int, default=8, metavar="N",
-                        help="a pair needs this many shared actions before it is judged")
+    parser.add_argument("--min-shared", type=shared_actions, default=8, metavar="N",
+                        help=f"a pair needs this many shared actions before it is judged. "
+                             f"Not the only floor: a skill with fewer than {MIN_SIGNATURE} "
+                             f"actions of its own is never scored against anything, however "
+                             f"low this goes")
     parser.add_argument("--advisory", action="store_true",
                         help="report and exit 0, annotating each finding for the pull "
                              "request, unless --strict is given or a pair with a skill "
@@ -1129,8 +1218,13 @@ def summarize(skills: list[dict], scored: list[dict], undeclared: list[dict],
               + ", ".join(f"{p['left']}|{p['right']}" for p in needs_review), file=sys.stderr)
         return 1
     worst = worst_no_edge(scored, args.min_shared)
-    summary = (f"{len(skills)} skill(s), {len(scored)} scored pair(s), {len(undeclared)} "
-               f"undeclared overlap(s) reported")
+    # Both floors in the one line, because a pair count on its own reads as coverage: most
+    # of this tree is out of reach of the action axis, and only --queue looks at it.
+    judged = len([p for p in scored if len(p["shared"]) >= args.min_shared])
+    summary = (f"{len(skills)} skill(s), {len(skills) * (len(skills) - 1) // 2} pair(s) = "
+               f"{judged} judged + {len(scored) - judged} under --min-shared "
+               f"{args.min_shared} + {below_floor(skills)} under the {MIN_SIGNATURE}-action "
+               f"floor, {len(undeclared)} undeclared overlap(s) reported")
     if worst:
         summary += f", worst {worst['left']} | {worst['right']} at {worst['containment']:.4f}"
     if needs_review:

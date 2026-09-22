@@ -75,7 +75,7 @@ request is what leaves an agent nothing to route on. `--advisory` in CI, because
 two overlapping skills should win is a judgement about the catalog. One finding blocks even
 so: at containment 1.0 a skill authored here does nothing the other already does, so there
 is no division of labour to weigh — two imports at 1.0 stay a warning, because that repair
-lives upstream. Its `--self-test` does block, and `--mutate M1`…`M11` exist so that each way
+lives upstream. Its `--self-test` does block, and `--mutate M1`…`M13` exist so that each way
 of breaking the detector can be shown to turn it red.
 
 What it cannot do, measured rather than assumed:
@@ -90,6 +90,15 @@ What it cannot do, measured rather than assumed:
   description with the skill it copies while sharing 1.0000 of its actions, and a
   shared-name precondition would drop 4 of the 14 judgeable pairs in this tree — so the
   cheap signal is a reading order, never a filter and never a verdict.
+- **Most of the catalog is out of the action axis's reach, and the summary says so.** Of
+  the 528 pairs in 33 skills, 14 are judged; 421 share fewer than the `--min-shared 8`
+  actions a pair needs, and 93 touch a skill carrying fewer than five actions of its own
+  and are never scored. That second floor is not a flag, and `--min-shared` below it is
+  refused rather than accepted: it would read as a stricter run while reaching nothing.
+  What it buys is visible in the one pair it hides — `linux-perf` and `onetbb-quickstart`
+  share `cmd:double`, `cmd:i` and `cmd:int`, three loop variables out of a C snippet, for a
+  containment of 1.0 over three actions. That is the only 1.0 pair in the tree, and the
+  floor is why the one blocking finding does not fire on it.
 - **The threshold is not a constant to defend.** CI runs `--max-overlap 0.75`, in the
   middle of the 1.0–1.5× band the self-test enforces around the highest-scoring pair in the
   tree (0.6154 at 33 skills). That ceiling was measured to rise with the catalog — 0.36 at
