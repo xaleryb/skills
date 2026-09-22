@@ -3,7 +3,7 @@
 
     python3 tools/lint_skill_overlap.py                      # every pair, ranked
     python3 tools/lint_skill_overlap.py --show vllm-xpu-run  # one skill's signature
-    python3 tools/lint_skill_overlap.py --max-overlap 0.65 --min-shared 8 --advisory
+    python3 tools/lint_skill_overlap.py --max-overlap 0.75 --min-shared 8 --advisory
 
 Two skills driving the same tool with the same flags compete for the same request. That
 is fine, and this catalog is full of such pairs — as long as one of them says which is
@@ -54,9 +54,11 @@ from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = REPO_ROOT / "skills"
-# --self-test reads the threshold out of the workflow rather than keeping a second copy.
+# --self-test reads the threshold out of the workflow rather than keeping a second copy, and
+# asserts that every other file documenting the gate names the same number.
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
 GATE_THRESHOLD = re.compile(r"--max-overlap\s+([0-9.]+)")
+THRESHOLD_TEXT = {".md", ".yml", ".yaml", ".py", ".sh", ".json", ".txt"}
 
 from validate_skills import Report, split_frontmatter  # noqa: E402
 
@@ -663,6 +665,42 @@ def queued(fixture: dict, skills: list[dict], min_shared: int) -> list[dict]:
     return [pair for pair in ranked if fixture["name"] in (pair["left"], pair["right"])]
 
 
+def threshold_copies() -> dict[float, list[str]]:
+    """Every file that documents the gate threshold, keyed by the value it names.
+
+    A walk rather than the four files that name it today: a fifth copy in a file nobody
+    thought of is the drift this exists to catch, and a hand-list here would itself be one
+    more thing to keep in step. skills/ is skipped - a skill body is content, and a skill
+    that ever teaches this flag should not be able to fail the gate's own calibration.
+    """
+    found: dict[float, list[str]] = {}
+    for base, directories, names in os.walk(REPO_ROOT):
+        directories[:] = sorted(d for d in directories if d not in (".git", "skills"))
+        for name in sorted(names):
+            path = Path(base) / name
+            if path.suffix not in THRESHOLD_TEXT:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for value in GATE_THRESHOLD.findall(text):
+                found.setdefault(float(value), []).append(
+                    path.relative_to(REPO_ROOT).as_posix())
+    return found
+
+
+def suggested_threshold(ceiling: float) -> float | None:
+    """The 0.05 step to put in the workflow for a tree with this ceiling, or None.
+
+    Not the next step above the ceiling: at the edge of the band the skill after this one
+    moves it again, which is the whole reason this function exists. 1.15x leaves room for
+    one more sibling and stays inside the 1.5x the band allows. Nothing above 0.90 is
+    offered - a ceiling that high means two skills are close to subsumption, and the answer
+    there is to narrow one of them, not to raise a number until it stops reporting them.
+    """
+    room = [step / 20 for step in range(2, 19)
+            if ceiling < step / 20 <= 1.5 * ceiling and step / 20 >= 1.15 * ceiling]
+    return min(room) if room else None
+
+
 def self_test(max_overlap: float | None, min_shared: int) -> int:
     """Assert the detector still detects, against skills/ as committed. Writes nothing.
 
@@ -748,11 +786,18 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
 
     # A band, not equality: the worst undeclared pair goes *down* when someone writes a
     # hand-off line, so pinning the threshold to it would force a workflow edit per fix.
+    # The workflow is the one copy CI reads, so it is the one this calibrates against; the
+    # rest are documentation that would otherwise tell a contributor to run a gate the
+    # repository no longer runs.
+    copies = threshold_copies()
+    workflow_name = WORKFLOW.relative_to(REPO_ROOT).as_posix()
+    check("every copy of the threshold names the same number",
+          len(copies) == 1 and any(workflow_name in paths for paths in copies.values()),
+          "; ".join(f"{value:.2f} in {', '.join(sorted(set(paths)))}"
+                    for value, paths in sorted(copies.items()))
+          or "nothing names --max-overlap, so CI runs no gate")
     if max_overlap is None:
-        found = {float(value) for value in GATE_THRESHOLD.findall(
-            WORKFLOW.read_text(encoding="utf-8") if WORKFLOW.is_file() else "")}
-        check("the workflow names the threshold exactly once", len(found) == 1,
-              f"validate.yml runs --max-overlap {sorted(found) or 'nothing'}")
+        found = {value for value, paths in copies.items() if workflow_name in paths}
         budget = min(found) if found else 0.0
     else:
         budget = max_overlap
@@ -765,12 +810,32 @@ def self_test(max_overlap: float | None, min_shared: int) -> int:
     judgeable = [pair for pair in scored if len(pair["shared"]) >= min_shared]
     ceiling = max(pair["containment"] for pair in judgeable)
     top_pair = max(judgeable, key=lambda pair: pair["containment"])
-    check("the threshold sits just above the whole tree",
-          ceiling < budget <= 1.5 * ceiling,
-          f"highest of the {len(judgeable)} judgeable pair(s) is {top_pair['left']}|"
-          f"{top_pair['right']} at {ceiling:.4f}, threshold {budget:.2f}, margin "
-          f"{budget / ceiling:.2f}x (want 1.0-1.5x); worst undeclared pair {worst['left']}|"
-          f"{worst['right']} at {worst['containment']:.4f}")
+    in_band = ceiling < budget <= 1.5 * ceiling
+    measured = (f"highest of the {len(judgeable)} judgeable pair(s) is {top_pair['left']}|"
+                f"{top_pair['right']} at {ceiling:.4f}, threshold {budget:.2f}, margin "
+                f"{budget / ceiling:.2f}x (want 1.0-1.5x)")
+    if in_band:
+        detail = (f"{measured}; worst undeclared pair {worst['left']}|{worst['right']} at "
+                  f"{worst['containment']:.4f}")
+    else:
+        # The fix is a number in a file the pull request that trips this almost certainly
+        # never touched, so name the file and the number instead of leaving them to be
+        # worked out from the source.
+        suggestion = suggested_threshold(ceiling)
+        where = ", ".join(sorted({path for paths in copies.values() for path in paths})) \
+            or workflow_name
+        cause = ("the catalog grew into the threshold" if budget <= ceiling
+                 else "the threshold carries slack nobody chose")
+        detail = (f"{measured}. To fix: {cause}, legal range is above {ceiling:.4f} and up "
+                  f"to {1.5 * ceiling:.4f}, so "
+                  + (f"set --max-overlap to {suggestion:.2f} in {where}. "
+                     f"{top_pair['left']} | {top_pair['right']} is not itself a finding: it "
+                     f"is reported only while the number is left below it."
+                     if suggestion else
+                     f"no step up to 0.90 leaves room above it: narrow {top_pair['left']} "
+                     f"or {top_pair['right']} instead, since at {ceiling:.4f} one of the "
+                     f"two nearly does everything the other does."))
+    check("the threshold sits just above the whole tree", in_band, detail)
 
     thin = sorted(
         skill["name"] for skill in skills
@@ -894,8 +959,11 @@ MUTATIONS = {
     "M1": "PLATFORM = set()",
     "M2": "read Python fences as shell",
     "M3": "delete the flag: regex",
-    "M4": "--max-overlap 0.30",
-    "M5": "--max-overlap 0.95",
+    # Spelled without the flag on purpose: --self-test scans the repository for
+    # `--max-overlap N` to catch a documented copy drifting, and these two would read as
+    # copies that disagree.
+    "M4": "gate the tree at 0.30, below what is already merged",
+    "M5": "gate the tree at 0.95, above anything short of a copy",
     "M6": "inject a hand-off line into torch-xpu-profile",
     "M7": "delete the hand-off line from vllm-xpu-run",
     "M8": "let an inherited hand-off excuse a verbatim copy",

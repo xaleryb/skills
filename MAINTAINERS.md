@@ -90,10 +90,14 @@ What it cannot do, measured rather than assumed:
   description with the skill it copies while sharing 1.0000 of its actions, and a
   shared-name precondition would drop 4 of the 14 judgeable pairs in this tree — so the
   cheap signal is a reading order, never a filter and never a verdict.
-- **The threshold is not a constant to defend.** 0.65 is one step above the
-  highest-scoring pair in the tree today, and that ceiling was measured to rise with the
-  catalog — 0.36 at 12 skills, 0.56 at 20, 0.62 at 33. The self-test bounds it to 1.0–1.5×
-  that ceiling and fails when the catalog grows into it, which is the signal to raise it.
+- **The threshold is not a constant to defend.** CI runs `--max-overlap 0.75`, in the
+  middle of the 1.0–1.5× band the self-test enforces around the highest-scoring pair in the
+  tree (0.6154 at 33 skills). That ceiling was measured to rise with the catalog — 0.36 at
+  12 skills, 0.56 at 20, 0.62 at 33, and 0.6923 with one more `dpnp-*` skill added — so the
+  number is deliberately not at the edge: at the edge, a pull request that only adds a
+  sibling skill fails the blocking self-test on this repository's workflow file. When the
+  catalog does grow into 0.75, the self-test prints the legal range and the exact value to
+  set, and it fails if any other file naming the flag names a different number.
 
 ## Level 2 — the differential
 

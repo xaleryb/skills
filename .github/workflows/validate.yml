@@ -101,15 +101,19 @@ jobs:
       # that ranking agrees with the action score on 2 pairs of 14 and would drop 4 of them
       # if it were used to decide what gets compared.
       #
-      # 0.65 is the next 0.05 step above the highest-scoring judgeable pair in the tree
-      # (dpnp-quickstart | dpnp-troubleshooting, 0.6154), so nothing already merged is
-      # reported. It is not a constant to be defended: that ceiling was measured to rise
-      # with the catalog — 0.36 at 12 skills, 0.56 at 20, 0.62 at 33 — so the self-test
-      # bounds the threshold to 1.0-1.5x of it and asks for this number to move up when
-      # the catalog grows into it. A verbatim copy scores 1.0 whatever this number is, so
-      # the one blocking finding does not depend on it.
+      # The threshold below sits in the middle of the band the self-test enforces, not at
+      # its lower edge. That band is 1.0-1.5x the highest-scoring judgeable pair in the tree
+      # (dpnp-quickstart | dpnp-troubleshooting, 0.6154 at 33 skills), and the ceiling was
+      # measured to rise with the catalog — 0.36 at 12 skills, 0.56 at 20, 0.62 at 33. At
+      # the lower edge one more dpnp-* skill reusing dpnp.array/asnumpy/arange pushes the
+      # ceiling past it and fails the blocking step above on a pull request that only added
+      # a skill — measured at 0.6923 for a ninth such skill, which declared its hand-offs
+      # and was counted anyway, because the band is calibrated on every judgeable pair and
+      # not only the undeclared ones. Mid-band absorbs that; when it no longer does, the
+      # self-test prints the legal range and the value to put here. A verbatim copy scores
+      # 1.0 whatever this number is, so the one blocking finding does not depend on it.
       - name: Skill overlap
-        run: python3 tools/lint_skill_overlap.py --max-overlap 0.65 --min-shared 8 --advisory
+        run: python3 tools/lint_skill_overlap.py --max-overlap 0.75 --min-shared 8 --advisory
 
       # Its own step because it is the one check that depends on someone else's
       # server. A 404 or 410 fails it — that is a pointer an agent would follow

@@ -214,7 +214,7 @@ python3 tools/validate_skills.py --check-links   # also checks external URLs; ne
 python3 tools/run_evals.py --validate            # only if you wrote evals/evals.json
 python3 tools/lint_task_leakage.py --fail-on-leak 5   # only if you wrote a Harbor task
 python3 tools/sync_external.py --check           # only if you imported a skill
-python3 tools/lint_skill_overlap.py --max-overlap 0.65 --min-shared 8 --advisory
+python3 tools/lint_skill_overlap.py --max-overlap 0.75 --min-shared 8 --advisory
 ```
 
 Only `--check-links` and `sync_external.py --check` reach the network. If the offline ones
@@ -229,6 +229,12 @@ two skills sharing a tool is normal here, two skills competing silently for the 
 request is not. It also prints a short queue ranked by name and description alone, which is
 all that reaches a skill with too little code to compare; that queue is a reading order and
 settles nothing.
+
+There is one number you may be asked to move, and only when `--self-test` says so: adding a
+skill next to a family that already exists can raise the highest score in the catalog past
+`--max-overlap`, which fails the blocking `--self-test` step on this repository's workflow
+rather than on anything you wrote. The failure prints the legal range and the value to set,
+and names every file that has to change with it.
 
 ### The security scan
 
