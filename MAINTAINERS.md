@@ -219,15 +219,28 @@ still what was reviewed. The route is a pull request upstream, then move
 raising with the upstream maintainer rather than living with; if upstream will not take
 the fix, the pin is the wrong pin.
 
+Moving the pin is proposed for you: when a pinned directory changes at the tip of
+upstream's default branch, `upstream-sync.yml` opens one pull request per upstream that
+moves the pin and re-runs `--write`. An upstream that moved without touching a pinned
+directory is not reported. That pull request is not a decision; the diff to read is the
+skill text. By hand: `python3 tools/check_upstream.py` to survey, `--update` to move a pin
+locally, `--open-pr --remote <your fork> --against <this repository> --dry-run` to preview.
+
 ## CI
 
 | Workflow | Job | Runs on | Blocks? |
 |---|---|---|---|
-| `validate.yml` | `validate` — `validate_skills.py`, `run_evals.py --validate`, task leakage and its self-test, link check | every PR | yes |
+| `validate.yml` | `validate` — `validate_skills.py`, `run_evals.py --validate`, task leakage and its self-test, the staleness detector's self-test, link check | every PR | yes |
 | `validate.yml` | `install` — the installer resolves, lists, and installs from the catalog | every PR | yes |
 | `harbor-smoke.yml` | the oracle arm over every task in `tasks/` | PRs touching tasks or skills | yes |
 | `security.yml` | `actionlint`, `zizmor` | every PR | yes |
 | `codeql.yml` | code scanning, Python | PRs, push, weekly | reports |
+| `upstream-sync.yml` | `check_upstream.py --open-pr`: one pull request per upstream whose pinned directories moved | Sundays and Wednesdays, or by hand | opens PRs |
+
+`upstream-sync.yml` is the one workflow that writes, and runs only in `intel/skills`. It
+needs no secret, but needs *Allow GitHub Actions to create and approve pull requests*, or it
+fails at `gh pr create`. Its pull request's checks wait for a maintainer to select **Approve
+workflows to run**; an `UPSTREAM_SYNC_TOKEN` app or account token removes that click.
 
 `codeql.yml` runs its job only where the repository is public, which it reads from the event
 rather than being told. Uploading results needs GitHub Advanced Security, which a public
@@ -253,9 +266,9 @@ repository will pretend to have.
 
 All stdlib-only Python 3.11 or newer — 3.11 for `tomllib`, and the two tools that need it
 say so rather than failing as a missing module. None of them ships in the installable
-package. Two reach the
-network and both say so when they cannot: `validate_skills.py --check-links` and
-`sync_external.py`. Everything else runs offline.
+package. Three reach the network and each says so when it cannot:
+`validate_skills.py --check-links`, `sync_external.py`, and `check_upstream.py`.
+Everything else runs offline.
 
 | Script | What it does |
 |---|---|
@@ -266,10 +279,10 @@ network and both say so when they cannot: `validate_skills.py --check-links` and
 | `lint_task_leakage.py` | ranks how much of its own answer each task's instruction leaks; blocks above 5 in CI, and `--self-test` asserts against this tree that the detector behind that number still detects |
 | `behavior_digest.py` | digests the skill bytes a measurement was taken against, so a later edit to `SKILL.md` cannot leave `perf/` describing text that no longer exists |
 
-Two more exist for the imported skills: `sync_external.py` regenerates a copy from its pin
-with `--write`, or with `--check` re-fetches the pinned commit and byte-compares what is
-here against it, and `upstream_git.py` fetches just the pinned subtree instead of the
-repository around it.
+Three more exist for the imported skills: `sync_external.py` regenerates a copy from its
+pin with `--write`, or with `--check` re-fetches the pinned commit and byte-compares what
+is here against it; `check_upstream.py` proposes moving a pin whose directory changed
+upstream; and `upstream_git.py` is the transport both use, fetching only what they need.
 
 ## Current state
 
